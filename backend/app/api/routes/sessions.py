@@ -22,6 +22,7 @@ class SessionCreateRequest(BaseModel):
 
 class SessionUpdateRequest(BaseModel):
     title: Optional[str] = None
+    archived: Optional[bool] = None
 
 
 @router.get("")
@@ -36,6 +37,7 @@ async def list_sessions(
     """
     repo = ChatRepository(db)
     sessions = await repo.get_sessions(archived=archived, limit=limit, offset=offset)
+    total = await repo.get_sessions_count(archived=archived)
 
     return {
         "sessions": [
@@ -48,7 +50,9 @@ async def list_sessions(
             }
             for s in sessions
         ],
-        "total": len(sessions),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 
@@ -218,12 +222,16 @@ async def update_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if request.title:
+    if request.title is not None:
         session = await repo.update_session_title(session_id, request.title)
+
+    if request.archived is not None:
+        session = await repo.update_session_archive_status(session_id, request.archived)
 
     return {
         "id": session.id,
         "title": session.title,
+        "archived": session.archived,
         "updated_at": session.updated_at.isoformat() if session.updated_at else None,
     }
 

@@ -23,6 +23,8 @@ export interface Session {
 
 export interface SessionDetail extends Session {
   messages: Message[]
+  total: number
+  has_more: boolean
 }
 
 export interface Message {
@@ -70,7 +72,7 @@ export interface SessionExportResponse {
 // Session APIs
 export const sessionsApi = {
   list: (archived = false, limit = 50, offset = 0) =>
-    api.get<{ sessions: Session[] }>('/sessions', { params: { archived, limit, offset } }),
+    api.get<{ sessions: Session[]; total: number; limit: number; offset: number }>('/sessions', { params: { archived, limit, offset } }),
   
   get: (sessionId: string, limit = 30, offset = 0) =>
     api.get<SessionDetail>(`/sessions/${sessionId}`, { params: { limit, offset } }),
@@ -78,8 +80,14 @@ export const sessionsApi = {
   create: (title?: string) =>
     api.post<Session>('/sessions', { title }),
   
-  update: (sessionId: string, title?: string) =>
-    api.patch<Session>(`/sessions/${sessionId}`, { title }),
+  update: (sessionId: string, data: { title?: string; archived?: boolean }) =>
+    api.patch<Session & { archived: boolean }>(`/sessions/${sessionId}`, data),
+  
+  archive: (sessionId: string) =>
+    sessionsApi.update(sessionId, { archived: true }),
+  
+  unarchive: (sessionId: string) =>
+    sessionsApi.update(sessionId, { archived: false }),
   
   delete: (sessionId: string) =>
     api.delete(`/sessions/${sessionId}`),

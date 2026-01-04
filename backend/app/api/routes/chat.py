@@ -39,6 +39,7 @@ class ChatMessageRequest(BaseModel):
 
     content: str
     deep_search: bool = False
+    timezone: str = "UTC"
 
 
 class ChatMessageResponse(BaseModel):
@@ -96,6 +97,7 @@ async def run_agent_with_events(
     user_message: str,
     deep_search: bool,
     message_id: str,
+    user_timezone: str = "UTC",
 ) -> Dict[str, Any]:
     """
     Run agent workflow and stream events.
@@ -105,6 +107,7 @@ async def run_agent_with_events(
         user_message: User's message
         deep_search: Whether to use deep search
         message_id: Message ID for tracking
+        user_timezone: User's timezone for context
 
     Returns:
         Final state from agent execution
@@ -123,11 +126,12 @@ async def run_agent_with_events(
     )
 
     try:
-        # Run the agent workflow
+        # Run the agent workflow with timezone context
         final_state = await run_agent_workflow(
             user_message=user_message,
             session_id=session_id,
             deep_search=deep_search,
+            user_timezone=user_timezone,
         )
 
         # Send complete event
@@ -216,13 +220,14 @@ async def send_message(
         index_map={},
     )
 
-    # Start agent execution in background
+    # Start agent execution in background with timezone context
     asyncio.create_task(
         run_agent_with_events(
             session_id=session_id,
             user_message=request.content,
             deep_search=request.deep_search,
             message_id=assistant_message.id,
+            user_timezone=request.timezone,
         )
     )
 

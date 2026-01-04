@@ -8,7 +8,8 @@ export function useSessions() {
     setSessions, 
     addSession, 
     setActiveSession,
-    activeSessionId 
+    activeSessionId,
+    updateSession
   } = useChatStore()
   
   const [isLoading, setIsLoading] = useState(false)
@@ -64,16 +65,38 @@ export function useSessions() {
     }
   }, [setActiveSession])
   
+  const archiveSession = useCallback(async (sessionId: string) => {
+    try {
+      await sessionsApi.archive(sessionId)
+      updateSession(sessionId, { archived: true })
+    } catch (err) {
+      setError('Failed to archive session')
+      console.error(err)
+      throw err
+    }
+  }, [updateSession])
+  
+  const unarchiveSession = useCallback(async (sessionId: string) => {
+    try {
+      await sessionsApi.unarchive(sessionId)
+      updateSession(sessionId, { archived: false })
+    } catch (err) {
+      setError('Failed to unarchive session')
+      console.error(err)
+      throw err
+    }
+  }, [updateSession])
+  
   const deleteSession = useCallback(async (sessionId: string) => {
     try {
       await sessionsApi.delete(sessionId)
-      useChatStore.getState().updateSession(sessionId, { archived: true })
+      updateSession(sessionId, { archived: true })
     } catch (err) {
       setError('Failed to delete session')
       console.error(err)
       throw err
     }
-  }, [])
+  }, [updateSession])
   
   const searchSessions = useCallback(async (
     query: string, 
@@ -118,6 +141,8 @@ export function useSessions() {
     loadSessions,
     createSession,
     loadSession,
+    archiveSession,
+    unarchiveSession,
     deleteSession,
     searchSessions,
     clearSearch

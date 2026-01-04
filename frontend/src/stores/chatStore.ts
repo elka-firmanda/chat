@@ -31,32 +31,23 @@ export interface AgentStep {
 }
 
 interface ChatState {
-  // Sessions
   sessions: ChatSession[]
   activeSessionId: string | null
-  
-  // Messages
-  messages: Record<string, Message[]>  // session_id -> messages
-  
-  // Agent steps (progress)
-  agentSteps: Record<string, AgentStep[]>  // message_id -> steps
-  
-  // UI state
+  messages: Record<string, Message[]>
+  messageTotal: Record<string, number>
+  agentSteps: Record<string, AgentStep[]>
   isDeepSearchEnabled: boolean
   isLoading: boolean
-  
-  // Actions
   setSessions: (sessions: ChatSession[]) => void
   addSession: (session: ChatSession) => void
   updateSession: (sessionId: string, updates: Partial<ChatSession>) => void
   setActiveSession: (sessionId: string | null) => void
-  
   addMessage: (sessionId: string, message: Message) => void
   setMessages: (sessionId: string, messages: Message[]) => void
-  
+  prependMessages: (sessionId: string, messages: Message[]) => void
+  setMessageTotal: (sessionId: string, total: number) => void
   setAgentSteps: (messageId: string, steps: AgentStep[]) => void
   updateAgentStep: (messageId: string, stepId: string, updates: Partial<AgentStep>) => void
-  
   toggleDeepSearch: () => void
   setLoading: (loading: boolean) => void
 }
@@ -64,30 +55,23 @@ interface ChatState {
 export const useChatStore = create<ChatState>()(
   persist(
     (set) => ({
-      // Initial state
       sessions: [],
       activeSessionId: null,
       messages: {},
+      messageTotal: {},
       agentSteps: {},
       isDeepSearchEnabled: false,
       isLoading: false,
-      
-      // Session actions
       setSessions: (sessions) => set({ sessions }),
-      
       addSession: (session) => set((state) => ({
         sessions: [session, ...state.sessions]
       })),
-      
       updateSession: (sessionId, updates) => set((state) => ({
         sessions: state.sessions.map(s =>
           s.id === sessionId ? { ...s, ...updates } : s
         )
       })),
-      
       setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
-      
-      // Message actions
       addMessage: (sessionId, message) => set((state) => {
         const sessionMessages = state.messages[sessionId] || []
         return {
@@ -97,22 +81,35 @@ export const useChatStore = create<ChatState>()(
           }
         }
       }),
-      
       setMessages: (sessionId, messages) => set((state) => ({
         messages: {
           ...state.messages,
           [sessionId]: messages
         }
       })),
-      
-      // Agent step actions
+      prependMessages: (sessionId, messages) => set((state) => {
+        const sessionMessages = state.messages[sessionId] || []
+        const existingIds = new Set(sessionMessages.map(m => m.id))
+        const newMessages = messages.filter(m => !existingIds.has(m.id))
+        return {
+          messages: {
+            ...state.messages,
+            [sessionId]: [...newMessages, ...sessionMessages]
+          }
+        }
+      }),
+      setMessageTotal: (sessionId, total) => set((state) => ({
+        messageTotal: {
+          ...state.messageTotal,
+          [sessionId]: total
+        }
+      })),
       setAgentSteps: (messageId, steps) => set((state) => ({
         agentSteps: {
           ...state.agentSteps,
           [messageId]: steps
         }
       })),
-      
       updateAgentStep: (messageId, stepId, updates) => set((state) => {
         const steps = state.agentSteps[messageId] || []
         return {
@@ -124,12 +121,9 @@ export const useChatStore = create<ChatState>()(
           }
         }
       }),
-      
-      // UI actions
       toggleDeepSearch: () => set((state) => ({
         isDeepSearchEnabled: !state.isDeepSearchEnabled
       })),
-      
       setLoading: (loading) => set({ isLoading: loading })
     }),
     {

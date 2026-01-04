@@ -74,6 +74,7 @@ class AgentState(TypedDict):
     user_message: str
     session_id: str
     deep_search_enabled: bool
+    user_timezone: str
 
     # Working memory
     working_memory: Dict[str, Any]
@@ -107,12 +108,14 @@ def create_initial_state(
     user_message: str,
     session_id: str,
     deep_search_enabled: bool = False,
+    user_timezone: str = "UTC",
 ) -> AgentState:
     """Create initial state for a new conversation."""
     return AgentState(
         user_message=user_message,
         session_id=session_id,
         deep_search_enabled=deep_search_enabled,
+        user_timezone=user_timezone,
         working_memory={},
         current_plan=[],
         plan_version=1,
@@ -980,6 +983,7 @@ async def run_agent_workflow(
     user_message: str,
     session_id: str,
     deep_search: bool = False,
+    user_timezone: str = "UTC",
 ) -> Dict[str, Any]:
     """
     Run the agent workflow and return results.
@@ -988,32 +992,39 @@ async def run_agent_workflow(
         user_message: The user's input message
         session_id: Unique session identifier
         deep_search: Whether to use deep search mode
+        user_timezone: User's configured timezone for context
 
     Returns:
         Final state with answer and working memory
     """
-    # Create the graph
+    from app.utils.datetime import get_user_timezone_context
+
+    timezone_context = get_user_timezone_context(user_timezone)
+
     app = create_agent_graph()
 
-    # Create initial state
     initial_state = create_initial_state(
         user_message=user_message,
         session_id=session_id,
         deep_search_enabled=deep_search,
+        user_timezone=user_timezone,
     )
 
-    # Run the workflow
     config = {"configurable": {"thread_id": session_id}}
 
     final_state = None
     async for chunk in app.astream_events(initial_state, config, version="v1"):
-        # Can process streaming events here if needed
         pass
 
-    # Get final state
     final_state = await app.aget_state(config)
 
-    return final_state.values if final_state else initial_state
+    if final_state:
+        state_dict = dict(final_state.values)
+        state_dict["timezone_context"] = timezone_context
+        return state_dict
+
+    initial_state["timezone_context"] = timezone_context
+    return initial_state
 
 
 # Export the graph as 'app' for compatibility with imports

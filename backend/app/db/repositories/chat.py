@@ -42,6 +42,13 @@ class ChatRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_sessions_count(self, archived: bool = False) -> int:
+        """Get total count of sessions."""
+        result = await self.session.execute(
+            select(func.count(ChatSession.id)).where(ChatSession.archived == archived)
+        )
+        return result.scalar() or 0
+
     async def get_sessions(
         self, archived: bool = False, limit: int = 50, offset: int = 0
     ) -> List[ChatSession]:
@@ -75,6 +82,30 @@ class ChatRepository:
         session_obj = result.scalar_one_or_none()
         if session_obj:
             session_obj.archived = True
+            await self.session.flush()
+        return session_obj
+
+    async def unarchive_session(self, session_id: str) -> Optional[ChatSession]:
+        """Unarchive a session."""
+        result = await self.session.execute(
+            select(ChatSession).where(ChatSession.id == session_id)
+        )
+        session_obj = result.scalar_one_or_none()
+        if session_obj:
+            session_obj.archived = False
+            await self.session.flush()
+        return session_obj
+
+    async def update_session_archive_status(
+        self, session_id: str, archived: bool
+    ) -> Optional[ChatSession]:
+        """Update session archive status."""
+        result = await self.session.execute(
+            select(ChatSession).where(ChatSession.id == session_id)
+        )
+        session_obj = result.scalar_one_or_none()
+        if session_obj:
+            session_obj.archived = archived
             await self.session.flush()
         return session_obj
 
@@ -127,6 +158,13 @@ class ChatRepository:
             .offset(offset)
         )
         return list(result.scalars().all())
+
+    async def get_message_count(self, session_id: str) -> int:
+        """Get total count of messages for a session."""
+        result = await self.session.execute(
+            select(func.count(Message.id)).where(Message.session_id == session_id)
+        )
+        return result.scalar() or 0
 
     async def get_message(self, message_id: str) -> Optional[Message]:
         """Get a message by ID."""

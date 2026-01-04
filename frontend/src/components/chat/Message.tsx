@@ -1,78 +1,88 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { Message as MessageType } from '../../stores/chatStore'
 import { useChat } from '../../hooks/useChat'
 import { useSessions } from '../../hooks/useSessions'
 import { useChatStore } from '../../stores/chatStore'
 import ThinkingBlock from './ThinkingBlock'
-import { Copy, Check, GitFork, MoreHorizontal } from 'lucide-react'
+import { Copy, Check, GitFork, MoreHorizontal, ChevronDown, ChevronUp } from 'lucide-react'
 
 interface MessageProps {
   message: MessageType
 }
 
+const MAX_VISIBLE_LINES = 30
+
 export default function MessageComponent({ message }: MessageProps) {
   const [copied, setCopied] = useState(false)
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [isForking, setIsForking] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false)
   const contextMenuRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const isUser = message.role === 'user'
-  
+
   const { forkConversation } = useChat()
   const { loadSessions } = useSessions()
-  const { setActiveSession, setMessages, activeSessionId } = useChatStore()
-  
+  const { setActiveSession, setMessages } = useChatStore()
+
+  const lines = useMemo(() => message.content.split('\n'), [message.content])
+  const needsTruncation = lines.length > MAX_VISIBLE_LINES
+  const displayContent = isExpanded || !needsTruncation
+    ? message.content
+    : lines.slice(0, MAX_VISIBLE_LINES).join('\n')
+
   const handleCopy = async () => {
     await navigator.clipboard.writeText(message.content)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
-  
+
   const handleFork = async () => {
     setIsForking(true)
     setShowContextMenu(false)
-    
+
     try {
       const newSessionId = await forkConversation(message.id)
       await loadSessions()
-      
-      const response = await import('../../services/api').then(api => 
+
+      const response = await import('../../services/api').then(api =>
         api.sessionsApi.get(newSessionId)
       )
-      
+
       setActiveSession(newSessionId)
-      const { messages, ...sessionData } = response.data
+      const { messages } = response.data
       setMessages(newSessionId, messages)
-      
+
     } catch (error) {
       console.error('Failed to fork conversation:', error)
     } finally {
       setIsForking(false)
     }
   }
-  
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
         setShowContextMenu(false)
       }
     }
-    
+
     if (showContextMenu) {
       document.addEventListener('mousedown', handleClickOutside)
     }
-    
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [showContextMenu])
-  
+
   const thinkingContent = message.metadata?.thinking_content || "Processing..."
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} px-1 sm:px-2 md:px-0 group`}>
       <div className={`relative max-w-[90%] sm:max-w-[85%] md:max-w-[80%] rounded-2xl px-3 py-2.5 sm:px-4 sm:py-3 ${
-        isUser 
-          ? 'bg-primary text-primary-foreground rounded-br-md' 
+        isUser
+          ? 'bg-primary text-primary-foreground rounded-br-md'
           : 'bg-muted rounded-bl-md'
       }`}>
         {!isUser && (
@@ -91,9 +101,9 @@ export default function MessageComponent({ message }: MessageProps) {
             </button>
           </div>
         )}
-        
+
         {showContextMenu && (
-          <div 
+          <div
             ref={contextMenuRef}
             className="absolute right-0 top-8 bg-popover border rounded-lg shadow-lg py-1 z-50 min-w-[120px]"
           >
@@ -114,19 +124,42 @@ export default function MessageComponent({ message }: MessageProps) {
             </button>
           </div>
         )}
-        
+
         {!isUser && message.agent_type && (
-          <ThinkingBlock 
-            agent={message.agent_type as any} 
+          <ThinkingBlock
+            agent={message.agent_type as any}
             content={thinkingContent}
             defaultCollapsed={true}
           />
         )}
-        
-        <div className="whitespace-pre-wrap text-sm sm:text-base leading-relaxed">
-          {message.content}
+
+        <div
+          ref={contentRef}
+          className="whitespace-pre-wrap text-sm sm:text-base leading-relaxed"
+        >
+          {displayContent}
         </div>
-        
+
+        {needsTruncation && !isExpanded && (
+          <button
+            onClick={() => setIsExpanded(true)}
+            className="flex items-center gap-1 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors mt-1"
+          >
+            <ChevronDown size={14} />
+            Show more
+          </button>
+        )}
+
+        {needsTruncation && isExpanded && (
+          <button
+            onClick={() => setIsExpanded(false)}
+            className="flex items-center gap-1 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors mt-1"
+          >
+            <ChevronUp size={14} />
+            Show less
+          </button>
+        )}
+
         {!isUser && (
           <div className="flex items-center gap-1 mt-2 pt-2 border-t border-current/10">
             <button
@@ -138,13 +171,13 @@ export default function MessageComponent({ message }: MessageProps) {
             </button>
           </div>
         )}
-        
+
         <div className={`text-[10px] sm:text-xs mt-2 ${
           isUser ? 'text-primary-foreground/60' : 'text-muted-foreground'
         }`}>
-          {message.created_at && new Date(message.created_at).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit' 
+          {message.created_at && new Date(message.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
           })}
         </div>
       </div>

@@ -3,14 +3,10 @@ import { useSessions } from '../../hooks/useSessions'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { sessionsApi } from '../../services/api'
-import { MessageSquare, Archive, Search, ChevronDown, ChevronRight, Download, MoreHorizontal, X, Clock } from 'lucide-react'
-import ExampleCards from '../chat/ExampleCards'
-import MessageList from '../chat/MessageList'
-import InputBox from '../chat/InputBox'
-import { useChat } from '../../hooks/useChat'
+import { MessageSquare, Archive, Search, ChevronDown, ChevronRight, Download, MoreHorizontal, X, Clock, Unarchive, Trash2 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as Dialog from '@radix-ui/react-dialog'
 
-// Debounce hook for search input
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value)
   
@@ -28,7 +24,7 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export default function SessionList() {
-  const { sessions, activeSessionId, isLoading, searchResults, searchSessions, clearSearch } = useSessions()
+  const { sessions, activeSessionId, isLoading, searchResults, searchSessions, clearSearch, archiveSession, unarchiveSession, deleteSession } = useSessions()
   const { setActiveSession, isDeepSearchEnabled, toggleDeepSearch } = useChatStore()
   const { general } = useSettingsStore()
   const { loadSession } = useSessions()
@@ -39,11 +35,12 @@ export default function SessionList() {
   const [isExporting, setIsExporting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchType, setSearchType] = useState<'all' | 'sessions' | 'messages'>('all')
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   
-  // Debounce search query (300ms delay)
   const debouncedSearchQuery = useDebounce(searchQuery, 300)
   
-  // Trigger search when debounced query changes
   useEffect(() => {
     if (debouncedSearchQuery.trim().length >= 2) {
       searchSessions(debouncedSearchQuery, 20, searchType)
@@ -54,7 +51,6 @@ export default function SessionList() {
   
   const handleSelectSession = async (sessionId: string) => {
     await loadSession(sessionId)
-    // Clear search when selecting a session
     setSearchQuery('')
     setShowSearch(false)
   }
@@ -76,14 +72,11 @@ export default function SessionList() {
     setIsExporting(true)
     try {
       const response = await sessionsApi.export(sessionId)
-      
-      // Create blob and download
       const blob = new Blob([response.data], { type: 'application/pdf' })
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
       
-      // Get session title for filename
       const session = sessions.find(s => s.id === sessionId)
       const filename = session?.title 
         ? `${session.title.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`
@@ -114,21 +107,48 @@ export default function SessionList() {
     }
   }
   
-  const activeSessions = sessions.filter(s => !s.archived)
+  const handleArchive = async (sessionId: string, e: Event) => {
+    e.stopPropagation()
+    await archiveSession(sessionId)
+  }
+  
+  const handleUnarchive = async (sessionId: string, e: Event) => {
+    e.stopPropagation()
+    await unarchiveSession(sessionId)
+  }
+  
+  const handleDeleteClick = (sessionId: string, e: Event) => {
+    e.stopPropagation()
+    setSessionToDelete(sessionId)
+    setDeleteModalOpen(true)
+  }
+  
+  const handleConfirmDelete = async () => {
+    if (sessionToDelete) {
+      setIsDeleting(true)
+      try {
+        await deleteSession(sessionToDelete)
+        setDeleteModalOpen(false)
+        setSessionToDelete(null)
+      } catch (error) {
+        console.error('Failed to delete session:', error)
+        alert('Failed to delete session. Please try again.')
+      } finally {
+        setIsDeleting(false)
+      }
+    }
+  }
+  
+  const activeSessions = sessions.filter(s => !s.archived).slice(0, 50)
   const archivedSessions = sessions.filter(s => s.archived)
   
-  // Show search results when search is active
   const showSearchResults = showSearch && (searchResults?.results || searchQuery.trim().length >= 2)
   
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Main content area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Sidebar with search */}
         <aside className="w-64 bg-secondary flex flex-col transition-all duration-300">
-          {/* Header with New Chat and Search */}
           <div className="p-4 border-b">
-            {/* New Chat Button */}
             <button 
               onClick={handleNewChat}
               className="w-full flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors mb-3"
@@ -137,7 +157,6 @@ export default function SessionList() {
               <span>New Chat</span>
             </button>
             
-            {/* Search Input */}
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
               <input
@@ -158,7 +177,6 @@ export default function SessionList() {
               )}
             </div>
             
-            {/* Search Type Tabs */}
             {showSearch && (
               <div className="flex gap-1 mt-2">
                 <button
@@ -195,10 +213,8 @@ export default function SessionList() {
             )}
           </div>
 
-          {/* Search Results or Session List */}
           <div className="flex-1 overflow-auto p-2">
             {showSearchResults && searchResults ? (
-              // Search Results
               <div className="space-y-2">
                 {searchResults.results.length > 0 ? (
                   <>
@@ -252,7 +268,6 @@ export default function SessionList() {
                 )}
               </div>
             ) : (
-              // Regular Session List
               <>
                 {isLoading ? (
                   <div className="p-4 text-center text-muted-foreground text-sm">
@@ -264,7 +279,7 @@ export default function SessionList() {
                       <DropdownMenu.Root key={session.id}>
                         <DropdownMenu.Trigger asChild>
                           <button
-                            className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors text-left ${
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors text-left group ${
                               activeSessionId === session.id
                                 ? 'bg-primary/10 text-primary'
                                 : 'hover:bg-accent'
@@ -294,10 +309,8 @@ export default function SessionList() {
                             <DropdownMenu.Separator className="h-px bg-border my-1" />
                             
                             <DropdownMenu.Item 
-                              className="flex items-center gap-2 px-3 py-2 text-sm rounded-md outline-none hover:bg-accent cursor-pointer text-destructive"
-                              onSelect={() => {
-                                // Handle delete/archival
-                              }}
+                              className="flex items-center gap-2 px-3 py-2 text-sm rounded-md outline-none hover:bg-accent cursor-pointer"
+                              onSelect={(e: Event) => handleArchive(session.id, e)}
                             >
                               <Archive size={14} />
                               <span>Archive</span>
@@ -316,7 +329,6 @@ export default function SessionList() {
             )}
           </div>
 
-          {/* Bottom Actions */}
           <div className="p-2 border-t">
             <button 
               onClick={() => setShowArchived(!showArchived)}
@@ -333,20 +345,77 @@ export default function SessionList() {
             {showArchived && archivedSessions.length > 0 && (
               <div className="mt-2 space-y-1 pl-4">
                 {archivedSessions.map((session) => (
-                  <button
-                    key={session.id}
-                    onClick={() => handleSelectSession(session.id)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-accent transition-colors text-left text-muted-foreground"
-                  >
-                    <MessageSquare size={16} />
-                    <span className="truncate flex-1">{session.title || 'New Chat'}</span>
-                  </button>
+                  <DropdownMenu.Root key={session.id}>
+                    <DropdownMenu.Trigger asChild>
+                      <button
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-accent transition-colors text-left group text-muted-foreground"
+                      >
+                        <MessageSquare size={16} />
+                        <span className="truncate flex-1">{session.title || 'New Chat'}</span>
+                        <MoreHorizontal size={14} className="opacity-0 group-hover:opacity-100" />
+                      </button>
+                    </DropdownMenu.Trigger>
+                    
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content 
+                        className="min-w-[150px] bg-popover border rounded-lg shadow-lg p-1 z-50"
+                        sideOffset={5}
+                        align="end"
+                      >
+                        <DropdownMenu.Item 
+                          className="flex items-center gap-2 px-3 py-2 text-sm rounded-md outline-none hover:bg-accent cursor-pointer"
+                          onSelect={(e: Event) => handleUnarchive(session.id, e)}
+                        >
+                          <Unarchive size={14} />
+                          <span>Unarchive</span>
+                        </DropdownMenu.Item>
+                        
+                        <DropdownMenu.Separator className="h-px bg-border my-1" />
+                        
+                        <DropdownMenu.Item 
+                          className="flex items-center gap-2 px-3 py-2 text-sm rounded-md outline-none hover:bg-accent cursor-pointer text-destructive"
+                          onSelect={(e: Event) => handleDeleteClick(session.id, e)}
+                        >
+                          <Trash2 size={14} />
+                          <span>Delete</span>
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
                 ))}
               </div>
             )}
           </div>
         </aside>
       </div>
+
+      <Dialog.Root open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/50 z-50" />
+          <Dialog.Content className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-background border rounded-lg shadow-lg p-6 z-50 w-[90vw] max-w-[400px]">
+            <Dialog.Title className="text-lg font-semibold mb-2">Delete Session</Dialog.Title>
+            <Dialog.Description className="text-muted-foreground mb-4">
+              Are you sure you want to delete this session? This action cannot be undone.
+            </Dialog.Description>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteModalOpen(false)}
+                className="px-4 py-2 text-sm rounded-lg hover:bg-accent transition-colors"
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 text-sm bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition-colors"
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   )
 }
