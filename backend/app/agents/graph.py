@@ -17,6 +17,17 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from .memory import WorkingMemory, MemoryNode, AsyncWorkingMemory
+from .error_handler import (
+    AgentError,
+    ErrorType,
+    InterventionAction,
+    UserInterventionState,
+    get_intervention_state,
+    clear_intervention_state,
+    create_error_sse_event,
+    create_retry_sse_event,
+    create_intervention_sse_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +94,11 @@ class AgentState(TypedDict):
     retry_count: int
     error_log: List[Dict[str, Any]]
 
+    # Error handling and user intervention
+    awaiting_intervention: bool
+    intervention_action: Optional[str]
+    current_error: Optional[Dict[str, Any]]
+
     # Final output
     final_answer: str
 
@@ -110,6 +126,9 @@ def create_initial_state(
         requires_replan=False,
         retry_count=0,
         error_log=[],
+        awaiting_intervention=False,
+        intervention_action=None,
+        current_error=None,
         final_answer="",
     )
 

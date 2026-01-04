@@ -1,10 +1,13 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MessageSquare, Bot } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
+import { useChatErrorStore, PendingError } from '../../stores/errorStore'
+import { chatApi } from '../../services/api'
 import Message from './Message'
 import ExampleCards from './ExampleCards'
 import InputBox from './InputBox'
 import ProgressSteps from './ProgressSteps'
+import ErrorModal from './ErrorModal'
 import { useChat } from '../../hooks/useChat'
 import { useSessions } from '../../hooks/useSessions'
 import { useSSE } from '../../hooks/useSSE'
@@ -19,6 +22,14 @@ export default function ChatContainer() {
     updateAgentStep,
     setAgentSteps
   } = useChatStore()
+  
+  const { 
+    pendingError, 
+    setPendingError,
+    clearErrorState 
+  } = useChatErrorStore()
+  
+  const [isIntervening, setIsIntervening] = useState(false)
   
   const sessionMessages = activeSessionId ? messages[activeSessionId] || [] : []
   const currentSteps = activeSessionId ? agentSteps[activeSessionId] || [] : []
@@ -72,11 +83,67 @@ export default function ChatContainer() {
     },
     onError: (data) => {
       console.error('SSE Error:', data)
+      
+      // Set pending error for the modal
+      const pendingErrorData: PendingError = {
+        error: data.error,
+        step_info: data.step_info,
+        intervention_options: data.intervention_options,
+        timestamp: new Date().toISOString(),
+      }
+      setPendingError(pendingErrorData)
+      setIsIntervening(true)
+    },
+    onRetry: (data) => {
+      console.log('Retry attempt:', data)
+    },
+    onIntervention: (data) => {
+      console.log('User intervention:', data)
+      setIsIntervening(false)
+      clearErrorState()
     },
     onComplete: (data) => {
       console.log('Complete:', data)
+      setIsIntervening(false)
+      clearErrorState()
     }
   })
+
+  // Handle user intervention actions
+  const handleRetry = async () => {
+    if (!activeSessionId) return
+    
+    try {
+      await chatApi.intervene(activeSessionId, 'retry')
+    } catch (error) {
+      console.error('Failed to send retry action:', error)
+    }
+  }
+
+  const handleSkip = async () => {
+    if (!activeSessionId) return
+    
+    try {
+      await chatApi.intervene(activeSessionId, 'skip')
+    } catch (error) {
+      console.error('Failed to send skip action:', error)
+    }
+  }
+
+  const handleAbort = async () => {
+    if (!activeSessionId) return
+    
+    try {
+      await chatApi.intervene(activeSessionId, 'abort')
+    } catch (error) {
+      console.error('Failed to send abort action:', error)
+    }
+  }
+
+  const handleCloseErrorModal = () => {
+    setIsIntervening(false)
+    clearErrorState()
+  }
 
   // Show empty state when no messages
   if (sessionMessages.length === 0) {
@@ -109,6 +176,18 @@ export default function ChatContainer() {
   // Show messages with progress steps and input at bottom
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Error Modal */}
+      <ErrorModal
+        isOpen={isIntervening && pendingError !== null}
+        onClose={handleCloseErrorModal}
+        error={pendingError?.error || null}
+        interventionOptions={pendingError?.intervention_options || { retry: true, skip: true, abort: true }}
+        sessionId={activeSessionId || ''}
+        onRetry={handleRetry}
+        onSkip={handleSkip}
+        onAbort={handleAbort}
+      />
+      
       {/* Progress steps - shows when there are active steps */}
       <ProgressSteps steps={currentSteps} />
       

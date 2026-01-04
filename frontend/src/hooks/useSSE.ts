@@ -10,7 +10,35 @@ interface UseSSEOptions {
   onThought?: (data: { agent: string; content: string }) => void
   onStepUpdate?: (data: { step_id: string; status: string; description: string; logs?: string }) => void
   onMessageChunk?: (data: { content: string }) => void
-  onError?: (data: { message: string; retry_count: number }) => void
+  onError?: (data: { 
+    error: {
+      error_type: string
+      message: string
+      timestamp: string
+      retry_count: number
+      max_retries: number
+      can_retry: boolean
+    }
+    step_info?: {
+      type: string
+      description: string
+      step_number: number
+    }
+    intervention_options: {
+      retry: boolean
+      skip: boolean
+      abort: boolean
+    }
+  }) => void
+  onRetry?: (data: {
+    retry_count: number
+    max_retries: number
+    delay: number
+  }) => void
+  onIntervention?: (data: {
+    action: string
+    error: Record<string, unknown> | null
+  }) => void
   onComplete?: (data: { message_id: string }) => void
 }
 
@@ -48,9 +76,62 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
     })
     
     eventSource.addEventListener('error', (e) => {
-      const data = JSON.parse(e.data) as { message: string; retry_count: number }
-      setError(data.message)
-      options.onError?.(data)
+      try {
+        const data = JSON.parse(e.data) as {
+          error: {
+            error_type: string
+            message: string
+            timestamp: string
+            retry_count: number
+            max_retries: number
+            can_retry: boolean
+          }
+          step_info?: {
+            type: string
+            description: string
+            step_number: number
+          }
+          intervention_options: {
+            retry: boolean
+            skip: boolean
+            abort: boolean
+          }
+        }
+        setError(data.error.message)
+        options.onError?.(data)
+      } catch (parseError) {
+        // Fallback for old format
+        const legacyData = JSON.parse(e.data) as { message: string; retry_count: number }
+        setError(legacyData.message)
+        options.onError?.({
+          error: {
+            error_type: 'unknown_error',
+            message: legacyData.message,
+            timestamp: new Date().toISOString(),
+            retry_count: legacyData.retry_count,
+            max_retries: 3,
+            can_retry: legacyData.retry_count < 3,
+          },
+          intervention_options: { retry: true, skip: true, abort: true },
+        })
+      }
+    })
+    
+    eventSource.addEventListener('retry', (e) => {
+      const data = JSON.parse(e.data) as {
+        retry_count: number
+        max_retries: number
+        delay: number
+      }
+      options.onRetry?.(data)
+    })
+    
+    eventSource.addEventListener('intervention', (e) => {
+      const data = JSON.parse(e.data) as {
+        action: string
+        error: Record<string, unknown> | null
+      }
+      options.onIntervention?.(data)
     })
     
     eventSource.addEventListener('complete', (e) => {

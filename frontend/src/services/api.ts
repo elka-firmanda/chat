@@ -109,7 +109,22 @@ export const chatApi = {
     api.post(`/chat/cancel/${sessionId}`),
   
   fork: (messageId: string) =>
-    api.post<{ new_session_id: string }>(`/chat/fork/${messageId}`)
+    api.post<{ new_session_id: string }>(`/chat/fork/${messageId}`),
+  
+  // Intervention APIs
+  intervene: (sessionId: string, action: 'retry' | 'skip' | 'abort') =>
+    api.post<{ status: string; message: string; session_id: string; action: string }>(
+      `/chat/intervene/${sessionId}`,
+      { action }
+    ),
+  
+  getInterventionStatus: (sessionId: string) =>
+    api.get<{
+      session_id: string
+      awaiting_response: boolean
+      pending_error: Record<string, unknown> | null
+      available_actions: string[]
+    }>(`/chat/intervention/${sessionId}`)
 }
 
 // Config APIs
