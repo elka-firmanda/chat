@@ -4,6 +4,7 @@ import { useChatStore } from '../../stores/chatStore'
 import Message from './Message'
 import ExampleCards from './ExampleCards'
 import InputBox from './InputBox'
+import ProgressSteps from './ProgressSteps'
 import { useChat } from '../../hooks/useChat'
 import { useSessions } from '../../hooks/useSessions'
 import { useSSE } from '../../hooks/useSSE'
@@ -13,14 +14,15 @@ export default function ChatContainer() {
     activeSessionId, 
     messages, 
     isDeepSearchEnabled,
+    agentSteps,
     addMessage,
     updateAgentStep,
     setAgentSteps
   } = useChatStore()
   
   const sessionMessages = activeSessionId ? messages[activeSessionId] || [] : []
+  const currentSteps = activeSessionId ? agentSteps[activeSessionId] || [] : []
   const { sendMessage } = useChat()
-  const { loadSession } = useSessions()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const handleSelectExample = async (question: string) => {
@@ -39,11 +41,9 @@ export default function ChatContainer() {
   // SSE integration for real-time updates
   useSSE(activeSessionId, {
     onThought: (data) => {
-      // Add thinking block to the last assistant message
       console.log('Thought:', data)
     },
     onStepUpdate: (data) => {
-      // Update progress step
       if (activeSessionId) {
         updateAgentStep(activeSessionId, data.step_id, {
           status: data.status,
@@ -52,17 +52,14 @@ export default function ChatContainer() {
       }
     },
     onMessageChunk: (data) => {
-      // Stream assistant response
       if (activeSessionId) {
         const sessionMessages = useChatStore.getState().messages[activeSessionId] || []
         const lastMessage = sessionMessages[sessionMessages.length - 1]
         
         if (lastMessage && lastMessage.role === 'assistant') {
-          // Update existing message with new chunk
           lastMessage.content += data.content
           useChatStore.getState().addMessage(activeSessionId, lastMessage)
         } else {
-          // Create new assistant message
           addMessage(activeSessionId, {
             id: `temp-${Date.now()}`,
             role: 'assistant',
@@ -77,7 +74,6 @@ export default function ChatContainer() {
       console.error('SSE Error:', data)
     },
     onComplete: (data) => {
-      // Finalize message
       console.log('Complete:', data)
     }
   })
@@ -110,9 +106,12 @@ export default function ChatContainer() {
     )
   }
   
-  // Show messages with input at bottom
+  // Show messages with progress steps and input at bottom
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Progress steps - shows when there are active steps */}
+      <ProgressSteps steps={currentSteps} />
+      
       {/* Messages area - scrollable */}
       <div className="flex-1 overflow-auto p-3 md:p-4 space-y-3 md:space-y-4">
         {sessionMessages.map((message) => (
