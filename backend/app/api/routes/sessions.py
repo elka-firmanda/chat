@@ -70,6 +70,97 @@ async def create_session(
     }
 
 
+@router.get("/search")
+async def search_sessions(
+    q: str,
+    limit: int = 20,
+    search_type: str = "all",  # 'all', 'sessions', 'messages'
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Search sessions and messages with full-text search.
+
+    - q: Search query string
+    - limit: Maximum number of results (default 20, max 100)
+    - search_type: Search type - 'all' (default), 'sessions' (title only), 'messages' (content only)
+
+    Returns matching sessions with highlighted snippets for fast, relevant results.
+    Performance target: <100ms for typical queries.
+    """
+    import time
+
+    start_time = time.time()
+
+    # Validate and sanitize query
+    if not q or len(q.strip()) < 2:
+        return {
+            "query": q,
+            "results": [],
+            "total": 0,
+            "time_ms": round((time.time() - start_time) * 1000, 2),
+            "message": "Query must be at least 2 characters",
+        }
+
+    query = q.strip()
+    limit = min(limit, 100)  # Cap at 100 for performance
+
+    repo = ChatRepository(db)
+
+    # Search based on type
+    if search_type == "sessions":
+        # Search session titles only (faster)
+        sessions = await repo.search_sessions_by_title(query, limit=limit)
+        results = [
+            {
+                "session_id": s.id,
+                "session_title": s.title,
+                "message_content": None,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "highlighted_content": None,
+                "type": "session",
+            }
+            for s in sessions
+        ]
+    else:
+        # Search messages with FTS5 (default)
+        raw_results = await repo.search_messages(query, limit=limit)
+
+        # Transform results with highlighting
+        seen_sessions = set()
+        results = []
+        for message, session, highlighted in raw_results:
+            # Deduplicate by session (show first match per session)
+            if session.id in seen_sessions:
+                continue
+            seen_sessions.add(session.id)
+
+            results.append(
+                {
+                    "session_id": session.id,
+                    "session_title": session.title,
+                    "message_content": message.content[:200],
+                    "created_at": message.created_at.isoformat()
+                    if message.created_at
+                    else None,
+                    "highlighted_content": highlighted,
+                    "message_id": message.id,
+                    "role": message.role,
+                    "agent_type": message.agent_type,
+                    "type": "message",
+                }
+            )
+
+    elapsed_ms = round((time.time() - start_time) * 1000, 2)
+
+    return {
+        "query": query,
+        "results": results,
+        "total": len(results),
+        "time_ms": elapsed_ms,
+        "search_type": search_type,
+    }
+
+
 @router.get("/{session_id}")
 async def get_session(
     session_id: str,
@@ -149,97 +240,6 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Session not found")
 
     return {"status": "archived", "session_id": session_id}
-
-
-@router.get("/search")
-async def search_sessions(
-    q: str,
-    limit: int = 20,
-    type: str = "all",  # 'all', 'sessions', 'messages'
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Search sessions and messages with full-text search.
-
-    - q: Search query string
-    - limit: Maximum number of results (default 20, max 100)
-    - type: Search type - 'all' (default), 'sessions' (title only), 'messages' (content only)
-
-    Returns matching sessions with highlighted snippets for fast, relevant results.
-    Performance target: <100ms for typical queries.
-    """
-    import time
-
-    start_time = time.time()
-
-    # Validate and sanitize query
-    if not q or len(q.strip()) < 2:
-        return {
-            "query": q,
-            "results": [],
-            "total": 0,
-            "time_ms": round((time.time() - start_time) * 1000, 2),
-            "message": "Query must be at least 2 characters",
-        }
-
-    query = q.strip()
-    limit = min(limit, 100)  # Cap at 100 for performance
-
-    repo = ChatRepository(db)
-
-    # Search based on type
-    if type == "sessions":
-        # Search session titles only (faster)
-        sessions = await repo.search_sessions_by_title(query, limit=limit)
-        results = [
-            {
-                "session_id": s.id,
-                "session_title": s.title,
-                "message_content": None,
-                "created_at": s.created_at.isoformat() if s.created_at else None,
-                "highlighted_content": None,
-                "type": "session",
-            }
-            for s in sessions
-        ]
-    else:
-        # Search messages with FTS5 (default)
-        raw_results = await repo.search_messages(query, limit=limit)
-
-        # Transform results with highlighting
-        seen_sessions = set()
-        results = []
-        for message, session, highlighted in raw_results:
-            # Deduplicate by session (show first match per session)
-            if session.id in seen_sessions:
-                continue
-            seen_sessions.add(session.id)
-
-            results.append(
-                {
-                    "session_id": session.id,
-                    "session_title": session.title,
-                    "message_content": message.content[:200],
-                    "created_at": message.created_at.isoformat()
-                    if message.created_at
-                    else None,
-                    "highlighted_content": highlighted,
-                    "message_id": message.id,
-                    "role": message.role,
-                    "agent_type": message.agent_type,
-                    "type": "message",
-                }
-            )
-
-    elapsed_ms = round((time.time() - start_time) * 1000, 2)
-
-    return {
-        "query": query,
-        "results": results,
-        "total": len(results),
-        "time_ms": elapsed_ms,
-        "search_type": type,
-    }
 
 
 @router.get("/{session_id}/export")

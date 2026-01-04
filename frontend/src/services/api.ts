@@ -84,8 +84,8 @@ export const sessionsApi = {
   delete: (sessionId: string) =>
     api.delete(`/sessions/${sessionId}`),
   
-  search: (query: string, limit = 20, type: 'all' | 'sessions' | 'messages' = 'all') =>
-    api.get<SearchResponse>('/sessions/search', { params: { q: query, limit, type } }),
+  search: (query: string, limit = 20, searchType: 'all' | 'sessions' | 'messages' = 'all') =>
+    api.get<SearchResponse>('/sessions/search', { params: { q: query, limit, search_type: searchType } }),
 
   export: (sessionId: string) =>
     api.get(`/sessions/${sessionId}/export`, {

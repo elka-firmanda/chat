@@ -230,17 +230,126 @@ class ChatRepository:
         """
         Search messages by content.
         Returns list of (session, message, match_info) tuples.
+        Falls back to LIKE query if FTS5 is not available.
         """
-        # For SQLite, use LIKE; for PostgreSQL, use full-text search
+        # Try FTS5 first for better performance and highlighting
+        try:
+            return await self.search_messages_fts5(query, limit)
+        except Exception:
+            # Fallback to LIKE query
+            search_pattern = f"%{query}%"
+            result = await self.session.execute(
+                select(Message, ChatSession)
+                .join(ChatSession, Message.session_id == ChatSession.id)
+                .where(
+                    and_(
+                        Message.content.like(search_pattern),
+                        ChatSession.archived == False,
+                    )
+                )
+                .limit(limit)
+            )
+            return list(result.all())
+
+    async def search_messages_fts5(self, query: str, limit: int = 50) -> List[tuple]:
+        """
+        Full-text search using SQLite FTS5.
+        Returns results with highlighted snippets and ranking.
+        """
+        from sqlalchemy import text
+
+        # FTS5 search with ranking and highlighting
+        # Uses bm25 ranking for relevance and snippet() for highlighting
+        fts_query = f"""
+            SELECT 
+                messages.id,
+                messages.session_id,
+                messages.content,
+                messages.role,
+                messages.agent_type,
+                messages.created_at,
+                messages.extra_data,
+                chat_sessions.title,
+                bm25(messages_fts) as rank,
+                snippet(messages_fts, 0, '<mark>', '</mark>', '...', 64) as highlighted_content
+            FROM messages_fts
+            JOIN messages ON messages.id = messages_fts.rowid
+            JOIN chat_sessions ON messages.session_id = chat_sessions.id
+            WHERE messages_fts MATCH :query
+                AND chat_sessions.archived = 0
+            ORDER BY rank ASC
+            LIMIT :limit
+        """
+
+        result = await self.session.execute(
+            text(fts_query), {"query": query, "limit": limit}
+        )
+
+        results = []
+        for row in result.fetchall():
+            # Create a tuple-like structure (message, session, highlight)
+            message = type(
+                "FTSMessage",
+                (),
+                {
+                    "id": row[0],
+                    "session_id": row[1],
+                    "content": row[2],
+                    "role": row[3],
+                    "agent_type": row[4],
+                    "created_at": row[5],
+                    "extra_data": row[6],
+                },
+            )()
+
+            session = type(
+                "FTSChatSession",
+                (),
+                {"id": row[1], "title": row[8], "archived": False},
+            )()
+
+            highlight = row[10] if row[10] else row[2][:200]
+
+            results.append((message, session, highlight))
+
+        return results
+
+    async def search_sessions_by_title(
+        self, query: str, limit: int = 20
+    ) -> List[ChatSession]:
+        """
+        Search sessions by title (for quick session search).
+        """
         search_pattern = f"%{query}%"
         result = await self.session.execute(
-            select(Message, ChatSession)
+            select(ChatSession)
+            .where(
+                and_(
+                    ChatSession.title.like(search_pattern),
+                    ChatSession.archived == False,
+                )
+            )
+            .order_by(ChatSession.updated_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_search_suggestions(self, query: str, limit: int = 10) -> List[str]:
+        """
+        Get search suggestions based on recent message content.
+        Returns a list of suggested search terms.
+        """
+        # Get unique words from recent messages that match the query prefix
+        search_pattern = f"{query}%"
+        result = await self.session.execute(
+            select(Message.content)
             .join(ChatSession, Message.session_id == ChatSession.id)
             .where(
                 and_(
-                    Message.content.like(search_pattern), ChatSession.archived == False
+                    Message.content.like(search_pattern),
+                    ChatSession.archived == False,
                 )
             )
             .limit(limit)
         )
-        return list(result.all())
+        return [row[0] for row in result.fetchall() if row[0]]

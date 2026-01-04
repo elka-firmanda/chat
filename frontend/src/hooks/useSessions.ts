@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { sessionsApi } from '../services/api'
+import { sessionsApi, SearchResponse } from '../services/api'
 import { useChatStore } from '../stores/chatStore'
 
 export function useSessions() {
@@ -13,6 +13,7 @@ export function useSessions() {
   
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [searchResults, setSearchResults] = useState<SearchResponse | null>(null)
   
   const loadSessions = useCallback(async (includeArchived = false) => {
     setIsLoading(true)
@@ -74,6 +75,36 @@ export function useSessions() {
     }
   }, [])
   
+  const searchSessions = useCallback(async (
+    query: string, 
+    limit = 20, 
+    type: 'all' | 'sessions' | 'messages' = 'all'
+  ): Promise<SearchResponse | null> => {
+    if (!query || query.trim().length < 2) {
+      setSearchResults(null)
+      return null
+    }
+    
+    setIsLoading(true)
+    setError(null)
+    
+    try {
+      const response = await sessionsApi.search(query.trim(), limit, type)
+      setSearchResults(response.data)
+      return response.data
+    } catch (err) {
+      setError('Search failed')
+      console.error(err)
+      return null
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+  
+  const clearSearch = useCallback(() => {
+    setSearchResults(null)
+  }, [])
+  
   useEffect(() => {
     loadSessions()
   }, [loadSessions])
@@ -83,9 +114,12 @@ export function useSessions() {
     activeSessionId,
     isLoading,
     error,
+    searchResults,
     loadSessions,
     createSession,
     loadSession,
-    deleteSession
+    deleteSession,
+    searchSessions,
+    clearSearch
   }
 }
