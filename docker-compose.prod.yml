@@ -1,7 +1,4 @@
-version: '3.8'
-
-# Production compose file - optimized for production deployment
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+version: '3.9'
 
 services:
   backend:
@@ -11,16 +8,18 @@ services:
       target: runtime
     container_name: chatbot-backend-prod
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     environment:
-      - DATABASE_URL=postgresql://user:pass@postgres:5432/chatbot
+      - DATABASE_URL=${DATABASE_URL:-postgresql://user:pass@postgres:5432/chatbot}
       - PYTHONUNBUFFERED=1
-      - LOG_LEVEL=info
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CONFIG_PATH=/app/config.json
     env_file:
       - .env
     volumes:
       - backend_prod_data:/app/data
       - backend_logs:/app/logs
+      - ./config.json:/app/config.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,9 +48,9 @@ services:
       target: production
     container_name: chatbot-frontend-prod
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-80}:80"
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
     depends_on:
       backend:
         condition: service_healthy
@@ -77,15 +76,16 @@ services:
     image: postgres:15-alpine
     container_name: chatbot-postgres-prod
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: pass
-      POSTGRES_DB: chatbot
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}
+      POSTGRES_DB: ${POSTGRES_DB:-chatbot}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
     networks:
       - chatbot-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d chatbot"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-chatbot}"]
       interval: 30s
       timeout: 10s
       retries: 5

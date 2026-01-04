@@ -1,7 +1,4 @@
-version: '3.8'
-
-# Development compose file - enables hot reload and volume mounts
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+version: '3.9'
 
 services:
   backend:
@@ -12,74 +9,66 @@ services:
         BUILDKIT_INLINE_CACHE: 1
     container_name: chatbot-backend-dev
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     environment:
-      - DATABASE_URL=postgresql://user:pass@postgres:5432/chatbot
+      - DATABASE_URL=${DATABASE_URL:-postgresql://user:pass@postgres:5432/chatbot}
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=debug
+      - CONFIG_PATH=/app/config.json
     env_file:
       - .env
     volumes:
       - ./backend:/app
       - backend_dev_data:/app/data
       - backend_logs:/app/logs
+      - ./config.json:/app/config.json:ro
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - chatbot-network
-    develop:
-      watch:
-        - action: sync
-          path: ./backend
-          target: /app
-          ignore:
-            - __pycache__
-            - *.pyc
-            - .venv
-            - venv
-        - action: rebuild
-          path: backend/requirements.txt
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
     command: >
-      sh -c "alembic upgrade head && uvicicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   frontend:
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
+      target: builder
       args:
         BUILDKIT_INLINE_CACHE: 1
     container_name: chatbot-frontend-dev
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
       - VITE_DEV_PORT=3000
+      - CHOKIDAR_USEPOLLING=true
     volumes:
-      - ./frontend/src:/app/src
+      - ./frontend:/app
       - frontend_node_modules:/app/node_modules
     depends_on:
       backend:
         condition: service_healthy
     networks:
       - chatbot-network
-    develop:
-      watch:
-        - action: sync
-          path: ./frontend
-          target: /app
-          ignore:
-            - node_modules
-            - dist
+    restart: unless-stopped
     command: >
       sh -c "bun run dev --host 0.0.0.0 --port 3000"
 
   postgres:
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
 
 networks:
   chatbot-network:
