@@ -3,15 +3,15 @@ import { Outlet } from 'react-router-dom'
 import { Menu } from 'lucide-react'
 import SidebarDrawer from './SidebarDrawer'
 import Header from './Header'
+import { useChatStore } from '../../stores/chatStore'
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-screen bg-background text-foreground">
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className="hidden lg:flex w-64 bg-secondary flex-col border-r">
-        {/* Sidebar content - we'll reuse existing Sidebar component */}
+      <aside className="hidden lg:flex w-64 bg-secondary/50 flex-col border-r">
         <div className="flex-1 flex flex-col">
           <Outlet />
         </div>
@@ -29,28 +29,19 @@ export default function Layout() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Mobile Header */}
-        <header className="lg:hidden h-14 border-b flex items-center px-4 gap-2">
+        <header className="lg:hidden h-14 border-b flex items-center px-4 gap-2 bg-background">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-2 hover:bg-accent rounded-lg"
+            className="p-2 hover:bg-accent rounded-lg transition-colors"
           >
             <Menu size={20} />
           </button>
           <div className="flex-1" />
           <Header />
-          <style>{`
-            @keyframes slide-in-left {
-              from { transform: translateX(-100%); }
-              to { transform: translateX(0); }
-            }
-            .animate-in {
-              animation: slide-in-left 0.3s ease-out;
-            }
-          `}</style>
         </header>
 
         {/* Desktop Header - hidden on mobile */}
-        <header className="hidden lg:flex h-14 border-b items-center justify-end px-4 gap-2">
+        <header className="hidden lg:flex h-14 border-b items-center justify-end px-4 gap-2 bg-background">
           <Header />
         </header>
 
