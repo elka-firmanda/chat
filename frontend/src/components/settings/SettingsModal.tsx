@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
 import * as Switch from '@radix-ui/react-switch'
-import { X, Check, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon } from 'lucide-react'
+import { X, Check, AlertCircle, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon } from 'lucide-react'
 
 // Provider options
 const PROVIDERS = [
@@ -192,26 +192,68 @@ function ApiKeyInput({
   label,
   value,
   onChange,
+  provider,
   placeholder,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
+  provider: 'anthropic' | 'openai' | 'openrouter' | 'tavily'
   placeholder?: string
 }) {
   const [show, setShow] = useState(false)
   const [validating, setValidating] = useState(false)
-  const [isValid, setIsValid] = useState<boolean | null>(null)
+  const [validationResult, setValidationResult] = useState<{
+    valid: boolean | null
+    message: string
+  }>({ valid: null, message: '' })
+  const [lastValidatedKey, setLastValidatedKey] = useState('')
 
   const maskedValue = value ? maskApiKey(value) : ''
 
-  const handleValidate = async () => {
-    if (!value) return
+  const handleValidate = useCallback(async () => {
+    if (!value || value === lastValidatedKey) return
+
     setValidating(true)
-    // Simulate validation - in production, call API
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    setIsValid(value.length > 10)
-    setValidating(false)
+    setValidationResult({ valid: null, message: '' })
+
+    try {
+      const response = await fetch(`/api/v1/config/validate-api-key?provider=${provider}&api_key=${encodeURIComponent(value)}`)
+      
+      if (response.ok) {
+        const data = await response.json()
+        setValidationResult({ valid: true, message: data.message || 'API key is valid' })
+        setLastValidatedKey(value)
+      } else {
+        const errorData = await response.json()
+        setValidationResult({ 
+          valid: false, 
+          message: errorData.message || errorData.detail?.message || 'Validation failed' 
+        })
+      }
+    } catch (error) {
+      setValidationResult({ 
+        valid: false, 
+        message: error instanceof Error ? error.message : 'Network error during validation' 
+      })
+    } finally {
+      setValidating(false)
+    }
+  }, [value, provider, lastValidatedKey])
+
+  // Auto-validate on blur if key changed
+  const handleBlur = () => {
+    if (value && value !== lastValidatedKey) {
+      handleValidate()
+    }
+  }
+
+  // Reset validation when value changes
+  const handleChange = (newValue: string) => {
+    onChange(newValue)
+    if (newValue !== lastValidatedKey) {
+      setValidationResult({ valid: null, message: '' })
+    }
   }
 
   return (
@@ -222,12 +264,12 @@ function ApiKeyInput({
           <input
             type={show ? 'text' : 'password'}
             value={show ? value : maskedValue}
-            onChange={(e) => {
-              onChange(e.target.value)
-              setIsValid(null)
-            }}
+            onChange={(e) => handleChange(e.target.value)}
+            onBlur={handleBlur}
             placeholder={placeholder || `Enter ${label.toLowerCase()}`}
-            className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            className={`w-full px-3 py-2 bg-background border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
+              validationResult.valid === false ? 'border-red-500 focus:ring-red-500' : 'border-input'
+            }`}
           />
           <button
             type="button"
@@ -241,13 +283,39 @@ function ApiKeyInput({
           <button
             type="button"
             onClick={handleValidate}
-            disabled={validating}
-            className="px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg text-sm transition-colors disabled:opacity-50"
+            disabled={validating || value === lastValidatedKey}
+            className={`px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 ${
+              validationResult.valid === true 
+                ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                : validationResult.valid === false 
+                ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                : 'bg-muted hover:bg-muted/80'
+            }`}
+            title={validationResult.valid === false ? validationResult.message : undefined}
           >
-            {validating ? <Loader2 size={16} className="animate-spin" /> : isValid === true ? <Check size={16} className="text-green-500" /> : 'Validate'}
+            {validating ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : validationResult.valid === true ? (
+              <Check size={16} className="text-green-600" />
+            ) : validationResult.valid === false ? (
+              <AlertCircle size={16} className="text-red-600" />
+            ) : (
+              'Validate'
+            )}
           </button>
         )}
       </div>
+      {validationResult.message && (
+        <p className={`text-xs ${
+          validationResult.valid === true 
+            ? 'text-green-600' 
+            : validationResult.valid === false 
+            ? 'text-red-600' 
+            : 'text-muted-foreground'
+        }`}>
+          {validationResult.message}
+        </p>
+      )}
     </div>
   )
 }
@@ -671,6 +739,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                 <div className="mt-4 space-y-4 pt-4 border-t">
                   <ApiKeyInput
                     label="Tavily API Key"
+                    provider="tavily"
                     value={config.agents.researcher.tavily_api_key}
                     onChange={(v) => setConfig({ ...config, agents: { ...config.agents, researcher: { ...config.agents.researcher, tavily_api_key: v } } })}
                     placeholder="tvly-..."
@@ -727,23 +796,27 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                   <div className="space-y-4">
                     <ApiKeyInput
                       label="Anthropic API Key"
+                      provider="anthropic"
                       value={config.api_keys.anthropic}
                       onChange={(v) => setConfig({ ...config, api_keys: { ...config.api_keys, anthropic: v } })}
                       placeholder="sk-ant-..."
                     />
                     <ApiKeyInput
                       label="OpenAI API Key"
+                      provider="openai"
                       value={config.api_keys.openai}
                       onChange={(v) => setConfig({ ...config, api_keys: { ...config.api_keys, openai: v } })}
                       placeholder="sk-..."
                     />
                     <ApiKeyInput
                       label="OpenRouter API Key"
+                      provider="openrouter"
                       value={config.api_keys.openrouter}
                       onChange={(v) => setConfig({ ...config, api_keys: { ...config.api_keys, openrouter: v } })}
                     />
                     <ApiKeyInput
                       label="Tavily API Key"
+                      provider="tavily"
                       value={config.api_keys.tavily}
                       onChange={(v) => setConfig({ ...config, api_keys: { ...config.api_keys, tavily: v } })}
                       placeholder="tvly-..."
