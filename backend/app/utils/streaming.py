@@ -429,16 +429,17 @@ class WorkingMemoryStreamer:
     def __init__(
         self,
         session_id: str,
-        event_manager: Optional[SSEEventManager] = None,
+        event_manager: Optional["SSEEventManager"] = None,
     ):
         self.session_id = session_id
-        if event_manager is not None:
-            self.event_manager = event_manager
-        else:
-            import app.utils.streaming as streaming_module
-
-            self.event_manager = streaming_module.event_manager
+        self._event_manager: Optional["SSEEventManager"] = event_manager
         self._memory_data: Optional[Dict[str, Any]] = None
+
+    def _get_event_manager(self) -> "SSEEventManager":
+        """Get the event manager, using the global one if not provided."""
+        if self._event_manager is not None:
+            return self._event_manager
+        return event_manager
 
     async def emit_node_added(
         self,
@@ -450,7 +451,7 @@ class WorkingMemoryStreamer:
         content: Optional[Any] = None,
     ) -> None:
         """Emit node added event and update state."""
-        await self.event_manager.emit_node_added(
+        await self._get_event_manager().emit_node_added(
             session_id=self.session_id,
             node_id=node_id,
             agent=agent,
@@ -460,7 +461,6 @@ class WorkingMemoryStreamer:
             content=content,
         )
 
-        # Update cached memory data for incremental updates
         if self._memory_data:
             self._memory_data["index"][node_id] = {
                 "id": node_id,
@@ -490,7 +490,7 @@ class WorkingMemoryStreamer:
         completed: bool = False,
     ) -> None:
         """Emit node updated event."""
-        await self.event_manager.emit_node_updated(
+        await self._get_event_manager().emit_node_updated(
             session_id=self.session_id,
             node_id=node_id,
             status=status,
@@ -498,7 +498,6 @@ class WorkingMemoryStreamer:
             completed=completed,
         )
 
-        # Update cached memory data
         if self._memory_data and node_id in self._memory_data["index"]:
             if status:
                 self._memory_data["index"][node_id]["status"] = status
@@ -523,7 +522,7 @@ class WorkingMemoryStreamer:
             "index": index,
         }
 
-        await self.event_manager.emit_memory_update(
+        await self._get_event_manager().emit_memory_update(
             session_id=self.session_id,
             memory_tree=memory_tree,
             timeline=timeline,
