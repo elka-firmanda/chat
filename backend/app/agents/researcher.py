@@ -15,143 +15,13 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from app.tools.tavily import TavilyClient
+from app.tools.scraper import WebScraper
+
 from .memory import AsyncWorkingMemory
 from .graph import AgentType, StepStatus
 
 logger = logging.getLogger(__name__)
-
-
-class TavilyClient:
-    """Client for Tavily search API."""
-
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key
-        self.base_url = "https://api.tavily.com"
-
-    async def search(
-        self,
-        query: str,
-        max_results: int = 5,
-        include_raw_content: bool = False,
-    ) -> Dict[str, Any]:
-        """
-        Search Tavily for relevant results.
-
-        Args:
-            query: Search query
-            max_results: Maximum number of results
-            include_raw_content: Whether to include raw content
-
-        Returns:
-            Search results dictionary
-        """
-        if not self.api_key:
-            logger.warning("Tavily API key not set, returning mock results")
-            return self._mock_search(query, max_results)
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/search",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    json={
-                        "query": query,
-                        "max_results": max_results,
-                        "include_raw_content": include_raw_content,
-                    },
-                )
-                response.raise_for_status()
-                return response.json()
-        except Exception as e:
-            logger.error(f"Tavily search failed: {e}")
-            return self._mock_search(query, max_results)
-
-    def _mock_search(self, query: str, max_results: int) -> Dict[str, Any]:
-        """Return mock search results for testing."""
-        return {
-            "query": query,
-            "results": [
-                {
-                    "title": f"Result {i + 1} for {query}",
-                    "url": f"https://example.com/result{i + 1}",
-                    "content": f"Mock content for result {i + 1} about {query}",
-                    "score": 0.9 - (i * 0.1),
-                }
-                for i in range(min(max_results, 5))
-            ],
-            "follow_up_questions": [],
-        }
-
-
-class WebScraper:
-    """Parallel web scraper using BeautifulSoup."""
-
-    def __init__(self, timeout: int = 30):
-        self.timeout = timeout
-
-    async def scrape_urls(self, urls: List[str]) -> List[Dict[str, Any]]:
-        """
-        Scrape multiple URLs in parallel.
-
-        Args:
-            urls: List of URLs to scrape
-
-        Returns:
-            List of scraped content dictionaries
-        """
-        if not urls:
-            return []
-
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            tasks = [self._scrape_single(client, url) for url in urls]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            return [
-                r
-                for r in results
-                if isinstance(r, dict) and not isinstance(r, Exception)
-            ]
-
-    async def _scrape_single(
-        self, client: httpx.AsyncClient, url: str
-    ) -> Dict[str, Any]:
-        """Scrape a single URL."""
-        try:
-            response = await client.get(url, follow_redirects=True)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.text, "html.parser")
-
-            # Remove script and style elements
-            for tag in soup(["script", "style", "nav", "footer", "header"]):
-                tag.decompose()
-
-            # Extract main content
-            main_content = soup.find("main") or soup.find("article") or soup.body
-            text = (
-                main_content.get_text(separator="\n", strip=True)
-                if main_content
-                else ""
-            )
-
-            # Truncate if too long
-            max_length = 10000
-            if len(text) > max_length:
-                text = text[:max_length] + "... [truncated]"
-
-            return {
-                "url": url,
-                "title": soup.title.string if soup.title else url,
-                "content": text,
-                "word_count": len(text.split()),
-                "success": True,
-            }
-        except Exception as e:
-            logger.error(f"Failed to scrape {url}: {e}")
-            return {
-                "url": url,
-                "error": str(e),
-                "success": False,
-            }
 
 
 class RePlanDetector:
@@ -326,7 +196,7 @@ class ResearcherAgent:
         self,
         tavily_api_key: Optional[str] = None,
         max_urls_to_scrape: int = 5,
-        scraping_timeout: int = 30,
+        scraping_timeout: int = 600,
     ):
         self.tavily_client = TavilyClient(tavily_api_key)
         self.web_scraper = WebScraper(timeout=scraping_timeout)
