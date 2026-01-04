@@ -247,7 +247,14 @@ async def master_agent(state: AgentState) -> AgentState:
         completed=True,
     )
 
-    # Create step node for tracking
+    # Check if this step can run with subsequent steps in parallel
+    parallel_indices = StepAnalyzer.find_parallel_batch(current_plan, active_step)
+
+    if len(parallel_indices) > 1:
+        # Execute steps in parallel
+        return await execute_steps_parallel(state, parallel_indices, memory)
+
+    # Single step - create step node and continue with sequential execution
     step_node_id = await memory.add_node(
         agent=AgentType.MASTER.value,
         node_type="step",
@@ -540,6 +547,303 @@ async def database_agent(state: AgentState) -> AgentState:
     )
 
     state["database_output"] = database_output
+    state["working_memory"] = await memory.to_dict()
+
+    return state
+
+
+# ==================== Parallel Execution ====================
+
+
+class StepAnalyzer:
+    """Analyzes plan steps to determine which can run in parallel."""
+
+    # Steps that can run in parallel with same-type steps
+    PARALLEL_COMPATIBLE = {
+        StepType.RESEARCH.value,
+        StepType.CODE.value,
+        StepType.DATABASE.value,
+        StepType.CALCULATE.value,
+        StepType.CHART.value,
+    }
+
+    # Steps that must run sequentially (produce/consume shared state)
+    SEQUENTIAL_ONLY = {
+        StepType.REVIEW.value,
+        StepType.THINK.value,
+    }
+
+    @staticmethod
+    def can_run_parallel(step1: Dict[str, Any], step2: Dict[str, Any]) -> bool:
+        """
+        Determine if two steps can run in parallel.
+
+        Steps can run parallel if:
+        1. Both are compatible types (not review/think)
+        2. Neither has a depends_on pointing to the other
+        3. They don't have conflicting resource requirements
+        """
+        type1 = step1.get("type", "")
+        type2 = step2.get("type", "")
+
+        # Sequential-only steps must run alone
+        if (
+            type1 in StepAnalyzer.SEQUENTIAL_ONLY
+            or type2 in StepAnalyzer.SEQUENTIAL_ONLY
+        ):
+            return False
+
+        # Check dependency constraints
+        dep1 = step1.get("depends_on")
+        dep2 = step2.get("step_number")
+        if dep1 is not None and dep1 == dep2:
+            return False
+
+        dep1 = step2.get("depends_on")
+        dep2 = step1.get("step_number")
+        if dep1 is not None and dep1 == dep2:
+            return False
+
+        # Different agent types can run in parallel
+        agent1 = step1.get("agent", "")
+        agent2 = step2.get("agent", "")
+
+        # Same agent type can run parallel (e.g., multiple research steps)
+        if agent1 == agent2 and agent1 in [
+            AgentType.RESEARCHER.value,
+            AgentType.TOOLS.value,
+            AgentType.DATABASE.value,
+        ]:
+            return True
+
+        # Different agents can run parallel if no shared state dependencies
+        if agent1 != agent2:
+            return True
+
+        return False
+
+    @staticmethod
+    def find_parallel_batch(
+        plan: List[Dict[str, Any]], start_step: int, max_batch_size: int = 3
+    ) -> List[int]:
+        """
+        Find a batch of steps that can run in parallel starting from start_step.
+
+        Args:
+            plan: The execution plan
+            start_step: Index to start looking from
+            max_batch_size: Maximum number of parallel steps
+
+        Returns:
+            List of step indices that can run in parallel
+        """
+        if start_step >= len(plan):
+            return []
+
+        batch = [start_step]
+        current_step = plan[start_step]
+
+        # REVIEW and THINK steps must run alone
+        if current_step.get("type") in StepAnalyzer.SEQUENTIAL_ONLY:
+            return batch
+
+        # Look ahead for parallel-compatible steps
+        for i in range(start_step + 1, len(plan)):
+            if len(batch) >= max_batch_size:
+                break
+
+            next_step = plan[i]
+            next_type = next_step.get("type", "")
+
+        for i in range(start_step + 1, len(plan)):
+            if len(batch) >= max_batch_size:
+                break
+
+            next_step = plan[i]
+            next_type = next_step.get("type", "")
+
+            # REVIEW and THINK break the parallel batch
+            if next_type in StepAnalyzer.SEQUENTIAL_ONLY:
+                break
+
+            # Check if this step can run in parallel with all in batch
+            can_parallelize = True
+            for batch_idx in batch:
+                if not StepAnalyzer.can_run_parallel(plan[batch_idx], next_step):
+                    can_parallelize = False
+                    break
+
+            if can_parallelize:
+                batch.append(i)
+
+        return batch
+
+
+async def execute_steps_parallel(
+    state: AgentState,
+    step_indices: List[int],
+    memory: AsyncWorkingMemory,
+) -> AgentState:
+    """
+    Execute multiple steps in parallel using asyncio.gather().
+
+    Args:
+        state: Current agent state
+        step_indices: List of step indices to execute
+        memory: Working memory instance
+
+    Returns:
+        Updated state with all parallel results merged
+    """
+    session_id = state["session_id"]
+    plan = state.get("current_plan", [])
+
+    if not step_indices or step_indices[0] >= len(plan):
+        return state
+
+    # Create parallel batch node in working memory
+    batch_node_id = await memory.add_node(
+        agent=AgentType.MASTER.value,
+        node_type="parallel_batch",
+        description=f"Parallel execution of {len(step_indices)} steps",
+        content={
+            "step_indices": step_indices,
+            "step_count": len(step_indices),
+        },
+    )
+
+    # Create coroutines for each step
+    async def run_single_step(step_idx: int) -> Dict[str, Any]:
+        """Run a single step and return its result."""
+        step = plan[step_idx]
+        step_type = step.get("type", StepType.THINK.value)
+        step_description = step.get("description", f"Step {step_idx + 1}")
+
+        # Create step node
+        step_node_id = await memory.add_node(
+            agent=AgentType.MASTER.value,
+            node_type="step",
+            description=step_description,
+            parent_id=batch_node_id,
+            content={
+                "step_type": step_type,
+                "step_number": step_idx,
+                "parallel_with": step_indices,
+            },
+        )
+
+        # Route to appropriate agent based on step type
+        step_state = state.copy()
+        step_state["active_step"] = step_idx
+        step_state["working_memory"] = await memory.to_dict()
+
+        # Execute the appropriate agent
+        agent_functions = {
+            StepType.RESEARCH.value: researcher_agent,
+            StepType.CODE.value: tools_agent,
+            StepType.DATABASE.value: database_agent,
+            StepType.CALCULATE.value: tools_agent,
+            StepType.CHART.value: tools_agent,
+        }
+
+        agent_func = agent_functions.get(step_type, master_agent)
+
+        try:
+            result_state = await agent_func(step_state)
+
+            # Mark step node as completed
+            await memory.update_node(
+                step_node_id,
+                completed=True,
+                status=StepStatus.COMPLETED.value,
+                content={
+                    "completed": True,
+                    "step_type": step_type,
+                    "step_number": step_idx,
+                },
+            )
+
+            return {
+                "step_index": step_idx,
+                "step_type": step_type,
+                "success": True,
+                "state": result_state,
+                "error": None,
+            }
+        except Exception as e:
+            # Mark step node as failed
+            await memory.update_node(
+                step_node_id,
+                completed=True,
+                status=StepStatus.FAILED.value,
+                content={
+                    "failed": True,
+                    "step_type": step_type,
+                    "step_number": step_idx,
+                    "error": str(e),
+                },
+            )
+
+            return {
+                "step_index": step_idx,
+                "step_type": step_type,
+                "success": False,
+                "state": None,
+                "error": str(e),
+            }
+
+    # Run all steps in parallel
+    tasks = [run_single_step(idx) for idx in step_indices]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Process results and merge into state
+    for result in results:
+        # Handle exceptions from asyncio.gather
+        if isinstance(result, BaseException):
+            # Log exception but continue with other results
+            state["error_log"].append(
+                {
+                    "type": "parallel_execution",
+                    "error": str(result),
+                    "step_indices": step_indices,
+                }
+            )
+            continue
+
+        if isinstance(result, dict) and result.get("success") and result.get("state"):
+            result_state = result["state"]
+
+            # Merge outputs from each agent into main state
+            for key in ["researcher_output", "tools_output", "database_output"]:
+                if key in result_state and result_state[key]:
+                    # For parallel results, we need to merge them
+                    # Use the last successful result or combine intelligently
+                    existing = state.get(key, [])
+                    new_output = result_state[key]
+
+                    if isinstance(existing, list):
+                        existing.append(new_output)
+                        state[key] = existing
+                    elif isinstance(existing, dict):
+                        # Merge dictionaries, preserving existing data
+                        state[key] = {**existing, **new_output}
+
+    # Mark batch as completed
+    await memory.update_node(
+        batch_node_id,
+        completed=True,
+        status=StepStatus.COMPLETED.value,
+        content={
+            "completed": True,
+            "step_count": len(step_indices),
+            "success_count": sum(
+                1 for r in results if isinstance(r, dict) and r.get("success")
+            ),
+        },
+    )
+
+    # Update active_step to after the parallel batch
+    state["active_step"] = max(step_indices) + 1
     state["working_memory"] = await memory.to_dict()
 
     return state
