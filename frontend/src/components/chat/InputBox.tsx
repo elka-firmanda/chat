@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Search } from 'lucide-react'
+import { Send, Search, Sparkles, Info } from 'lucide-react'
+import * as Tooltip from '@radix-ui/react-tooltip'
 import { useChatStore } from '../../stores/chatStore'
 import { useChat } from '../../hooks/useChat'
 
@@ -45,20 +46,50 @@ export default function InputBox() {
         onSubmit={handleSubmit} 
         className="flex items-end gap-2 p-3 md:p-4"
       >
-        {/* Deep search toggle - larger touch target on mobile */}
-        <button
-          type="button"
-          onClick={toggleDeepSearch}
-          className={`p-2.5 md:p-3 rounded-lg transition-colors touch-manipulation ${
-            isDeepSearchEnabled
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-muted text-muted-foreground hover:bg-muted/80'
-          }`}
-          title={isDeepSearchEnabled ? 'Deep search enabled' : 'Deep search disabled'}
-          aria-label="Toggle deep search"
-        >
-          <Search size={20} />
-        </button>
+        {/* Deep search toggle with tooltip */}
+        <Tooltip.Provider delayDuration={200}>
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <button
+                type="button"
+                onClick={toggleDeepSearch}
+                disabled={isLoading}
+                className={`p-2.5 md:p-3 rounded-lg transition-all touch-manipulation ${
+                  isDeepSearchEnabled
+                    ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                title={isDeepSearchEnabled ? 'Deep search enabled' : 'Deep search disabled'}
+                aria-label="Toggle deep search"
+              >
+                {isDeepSearchEnabled ? (
+                  <Sparkles size={20} className="animate-pulse" />
+                ) : (
+                  <Search size={20} />
+                )}
+              </button>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content 
+                className="z-50 px-3 py-2 bg-popover text-popover-foreground text-sm rounded-lg shadow-lg border max-w-xs animate-in fade-in zoom-in-95"
+                sideOffset={5}
+              >
+                <div className="flex items-start gap-2">
+                  <Info size={16} className="mt-0.5 shrink-0 text-violet-500" />
+                  <div>
+                    <p className="font-medium mb-0.5">Deep Search</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isDeepSearchEnabled 
+                        ? 'Enabled • Uses Tavily API, web scraping, and parallel research for comprehensive answers.'
+                        : 'Disabled • Click to enable deep research with Tavily API and intelligent web scraping.'}
+                    </p>
+                  </div>
+                </div>
+                <Tooltip.Arrow className="fill-popover" />
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+        </Tooltip.Provider>
         
         {/* Text input - grows to fill space */}
         <div className="flex-1 relative">
@@ -67,19 +98,33 @@ export default function InputBox() {
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message..."
-            className="w-full resize-none min-h-[44px] max-h-[150px] md:max-h-[200px] p-3 pr-12 rounded-xl border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-base md:text-sm"
+            placeholder={isDeepSearchEnabled ? "Ask anything with deep research..." : "Message..."}
+            className={`w-full resize-none min-h-[44px] max-h-[150px] md:max-h-[200px] p-3 pr-12 rounded-xl border focus:outline-none focus:ring-2 text-base md:text-sm transition-colors ${
+              isDeepSearchEnabled 
+                ? 'border-violet-200 dark:border-violet-800 focus:ring-violet-500' 
+                : 'border-input focus:ring-primary'
+            }`}
             rows={1}
             disabled={isLoading}
             enterKeyHint="send"
           />
+          {/* Deep search indicator inside input when enabled */}
+          {isDeepSearchEnabled && !isLoading && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <Sparkles size={14} className="text-violet-500 animate-pulse" />
+            </div>
+          )}
         </div>
         
         {/* Send button - larger touch target on mobile */}
         <button
           type="submit"
           disabled={!message.trim() || isLoading}
-          className="p-2.5 md:p-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors touch-manipulation"
+          className={`p-2.5 md:p-3 rounded-xl transition-all touch-manipulation ${
+            isDeepSearchEnabled && message.trim()
+              ? 'bg-violet-600 hover:bg-violet-700 text-white'
+              : 'bg-primary text-primary-foreground hover:bg-primary/90'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
           aria-label="Send message"
         >
           <Send size={20} />
@@ -89,9 +134,10 @@ export default function InputBox() {
       {/* Deep search indicator */}
       {isDeepSearchEnabled && (
         <div className="px-4 pb-3 md:px-4 md:pb-4">
-          <p className="text-xs text-muted-foreground text-center">
-            Deep search enabled • Uses Tavily API and web scraping
-          </p>
+          <div className="flex items-center justify-center gap-2 text-xs text-violet-600 dark:text-violet-400">
+            <Sparkles size={14} className="animate-pulse" />
+            <span>Deep search enabled • Tavily API + intelligent web scraping</span>
+          </div>
         </div>
       )}
     </div>
