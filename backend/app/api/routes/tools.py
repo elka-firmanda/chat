@@ -6,8 +6,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from backend.app.db.session import get_db
-from backend.app.tools.custom_tool_runner import (
+from app.db.session import get_db
+from app.tools.custom_tool_runner import (
     validate_tool_code,
     create_custom_tool,
     update_custom_tool,

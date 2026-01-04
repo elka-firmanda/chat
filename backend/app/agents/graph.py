@@ -1307,3 +1307,6 @@ async def _process_graph_event(
             agent="tools",
             content=f"Completed: {tool_name}",
         )
+
+
+app = create_agent_graph()
