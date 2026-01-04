@@ -1,16 +1,28 @@
+import { useEffect, useRef } from 'react'
+import { MessageSquare, Bot } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import Message from './Message'
 import ExampleCards from './ExampleCards'
+import InputBox from './InputBox'
 import { useChat } from '../../hooks/useChat'
 import { useSessions } from '../../hooks/useSessions'
-import { MessageSquare } from 'lucide-react'
+import { useSSE } from '../../hooks/useSSE'
 
 export default function ChatContainer() {
-  const { activeSessionId, messages, isDeepSearchEnabled } = useChatStore()
+  const { 
+    activeSessionId, 
+    messages, 
+    isDeepSearchEnabled,
+    addMessage,
+    updateAgentStep,
+    setAgentSteps
+  } = useChatStore()
+  
   const sessionMessages = activeSessionId ? messages[activeSessionId] || [] : []
   const { sendMessage } = useChat()
   const { loadSession } = useSessions()
-  
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
   const handleSelectExample = async (question: string) => {
     await sendMessage(question, isDeepSearchEnabled)
   }
@@ -18,7 +30,58 @@ export default function ChatContainer() {
   const handleNewChat = () => {
     useChatStore.getState().setActiveSession(null)
   }
-  
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [sessionMessages])
+
+  // SSE integration for real-time updates
+  useSSE(activeSessionId, {
+    onThought: (data) => {
+      // Add thinking block to the last assistant message
+      console.log('Thought:', data)
+    },
+    onStepUpdate: (data) => {
+      // Update progress step
+      if (activeSessionId) {
+        updateAgentStep(activeSessionId, data.step_id, {
+          status: data.status,
+          logs: data.logs
+        })
+      }
+    },
+    onMessageChunk: (data) => {
+      // Stream assistant response
+      if (activeSessionId) {
+        const sessionMessages = useChatStore.getState().messages[activeSessionId] || []
+        const lastMessage = sessionMessages[sessionMessages.length - 1]
+        
+        if (lastMessage && lastMessage.role === 'assistant') {
+          // Update existing message with new chunk
+          lastMessage.content += data.content
+          useChatStore.getState().addMessage(activeSessionId, lastMessage)
+        } else {
+          // Create new assistant message
+          addMessage(activeSessionId, {
+            id: `temp-${Date.now()}`,
+            role: 'assistant',
+            content: data.content,
+            agent_type: 'master',
+            created_at: new Date().toISOString()
+          })
+        }
+      }
+    },
+    onError: (data) => {
+      console.error('SSE Error:', data)
+    },
+    onComplete: (data) => {
+      // Finalize message
+      console.log('Complete:', data)
+    }
+  })
+
   // Show empty state when no messages
   if (sessionMessages.length === 0) {
     return (
@@ -55,6 +118,7 @@ export default function ChatContainer() {
         {sessionMessages.map((message) => (
           <Message key={message.id} message={message} />
         ))}
+        <div ref={messagesEndRef} />
       </div>
       
       {/* Input box */}
@@ -62,6 +126,3 @@ export default function ChatContainer() {
     </div>
   )
 }
-
-// Import InputBox locally to avoid circular dependency
-import InputBox from './InputBox'
