@@ -1,0 +1,74 @@
+{
+  "version": "1.0",
+  "general": {
+    "timezone": "auto",
+    "theme": "light",
+    "example_questions": [
+      "What are the latest AI breakthroughs?",
+      "Analyze my sales data for Q4",
+      "How does quantum computing work?",
+      "Generate a chart of user growth"
+    ]
+  },
+  "database": {
+    "type": "sqlite",
+    "sqlite_path": "./data/chatbot.db",
+    "postgresql_connection": null,
+    "pool_size": 5
+  },
+  "agents": {
+    "master": {
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "system_prompt": "You are a master orchestrator that coordinates subagents to answer complex questions."
+    },
+    "planner": {
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 2048,
+      "system_prompt": "You create step-by-step execution plans for the master agent."
+    },
+    "researcher": {
+      "provider": "openai",
+      "model": "gpt-4-turbo",
+      "max_tokens": 4096,
+      "tavily_api_key": "${TAVILY_API_KEY}",
+      "max_urls_to_scrape": 5,
+      "scraping_timeout": 600,
+      "system_prompt": "You are a research specialist that finds and analyzes information from the web."
+    },
+    "tools": {
+      "provider": "openai",
+      "model": "gpt-4-turbo",
+      "max_tokens": 2048,
+      "enabled_tools": ["code_executor", "calculator", "chart_generator"],
+      "sandbox_enabled": true,
+      "system_prompt": "You execute code and calculations to help answer user questions."
+    },
+    "database": {
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 4096,
+      "data_warehouse_schema": "",
+      "system_prompt": "You query and analyze data from the data warehouse."
+    }
+  },
+  "api_keys": {
+    "anthropic": "${ANTHROPIC_API_KEY}",
+    "openai": "${OPENAI_API_KEY}",
+    "openrouter": "${OPENROUTER_API_KEY}",
+    "tavily": "${TAVILY_API_KEY}"
+  },
+  "profiles": {
+    "fast": {
+      "master": {"model": "gpt-3.5-turbo"},
+      "planner": {"model": "gpt-3.5-turbo"}
+    },
+    "deep": {
+      "master": {"model": "claude-3-opus-20240229"},
+      "researcher": {"max_urls_to_scrape": 10}
+    }
+  }
+}
