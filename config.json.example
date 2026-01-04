@@ -1,8 +1,14 @@
 {
+  // Configuration version (do not modify)
   "version": "1.0",
+
+  // General settings
   "general": {
+    // Timezone: "auto" uses system timezone, or specify like "America/New_York"
     "timezone": "auto",
+    // Theme: "light" or "dark"
     "theme": "light",
+    // Example questions shown on empty chat
     "example_questions": [
       "What are the latest AI breakthroughs?",
       "Analyze my sales data for Q4",
@@ -10,62 +16,103 @@
       "Generate a chart of user growth"
     ]
   },
+
+  // Database configuration
   "database": {
+    // Database type: "sqlite" or "postgresql"
     "type": "sqlite",
+    // SQLite database file path (relative to backend directory)
     "sqlite_path": "./data/chatbot.db",
+    // PostgreSQL connection string (used when type="postgresql")
+    // Format: "postgresql://user:password@host:port/database"
     "postgresql_connection": null,
+    // Maximum database connection pool size
     "pool_size": 5
   },
+
+  // Agent configurations
   "agents": {
+    // Master agent - orchestrates all subagents
     "master": {
+      // LLM provider: "anthropic", "openai", or "openrouter"
       "provider": "anthropic",
+      // Model identifier
       "model": "claude-3-5-sonnet-20241022",
+      // Maximum tokens in response
       "max_tokens": 4096,
+      // Temperature (0.0-1.0): lower = more focused, higher = more creative
       "temperature": 0.7,
+      // System prompt - defines agent behavior
       "system_prompt": "You are a master orchestrator that coordinates subagents to answer complex questions."
     },
+
+    // Planner agent - creates execution plans
     "planner": {
       "provider": "anthropic",
       "model": "claude-3-5-sonnet-20241022",
       "max_tokens": 2048,
       "system_prompt": "You create step-by-step execution plans for the master agent."
     },
+
+    // Researcher agent - web search and scraping
     "researcher": {
       "provider": "openai",
       "model": "gpt-4-turbo",
       "max_tokens": 4096,
+      // Tavily API key (use ${TAVILY_API_KEY} for env var)
       "tavily_api_key": "${TAVILY_API_KEY}",
+      // Maximum URLs to scrape per search
       "max_urls_to_scrape": 5,
+      // Scraping timeout in seconds
       "scraping_timeout": 600,
       "system_prompt": "You are a research specialist that finds and analyzes information from the web."
     },
+
+    // Tools agent - code execution and calculations
     "tools": {
       "provider": "openai",
       "model": "gpt-4-turbo",
       "max_tokens": 2048,
+      // Enabled tools: "code_executor", "calculator", "chart_generator"
       "enabled_tools": ["code_executor", "calculator", "chart_generator"],
+      // Enable sandboxed code execution (RestrictedPython)
       "sandbox_enabled": true,
       "system_prompt": "You execute code and calculations to help answer user questions."
     },
+
+    // Database agent - data warehouse queries
     "database": {
       "provider": "anthropic",
       "model": "claude-3-5-sonnet-20241022",
       "max_tokens": 4096,
+      // Data warehouse schema (SQL or description)
+      // Leave empty if not connecting to a data warehouse
       "data_warehouse_schema": "",
       "system_prompt": "You query and analyze data from the data warehouse."
     }
   },
+
+  // API keys (use environment variables for security)
+  // Keys are masked in API responses
   "api_keys": {
+    // Anthropic API key (use ${ANTHROPIC_API_KEY} for env var)
     "anthropic": "${ANTHROPIC_API_KEY}",
+    // OpenAI API key (use ${OPENAI_API_KEY} for env var)
     "openai": "${OPENAI_API_KEY}",
+    // OpenRouter API key (use ${OPENROUTER_API_KEY} for env var)
     "openrouter": "${OPENROUTER_API_KEY}",
+    // Tavily API key (use ${TAVILY_API_KEY} for env var)
     "tavily": "${TAVILY_API_KEY}"
   },
+
+  // Configuration profiles for different use cases
   "profiles": {
+    // Fast mode - uses smaller, faster models
     "fast": {
       "master": {"model": "gpt-3.5-turbo"},
       "planner": {"model": "gpt-3.5-turbo"}
     },
+    // Deep mode - uses larger models, more thorough research
     "deep": {
       "master": {"model": "claude-3-opus-20240229"},
       "researcher": {"max_urls_to_scrape": 10}

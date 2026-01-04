@@ -1,11 +1,15 @@
 version: '3.8'
 
+# Production compose file - optimized for production deployment
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
 services:
   backend:
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
-    container_name: chatbot-backend
+      target: runtime
+    container_name: chatbot-backend-prod
     ports:
       - "8000:8000"
     environment:
@@ -15,7 +19,7 @@ services:
     env_file:
       - .env
     volumes:
-      - backend_data:/app/data
+      - backend_prod_data:/app/data
       - backend_logs:/app/logs
     depends_on:
       postgres:
@@ -27,16 +31,25 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 30s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   frontend:
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
-    container_name: chatbot-frontend
+      target: production
+    container_name: chatbot-frontend-prod
     ports:
-      - "3000:80"
+      - "80:80"
     environment:
       - VITE_API_URL=http://localhost:8000
     depends_on:
@@ -49,29 +62,43 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 30s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
 
   postgres:
     image: postgres:15-alpine
-    container_name: chatbot-postgres
+    container_name: chatbot-postgres-prod
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: pass
       POSTGRES_DB: chatbot
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     networks:
       - chatbot-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d chatbot"]
-      interval: 10s
-      timeout: 5s
+      interval: 30s
+      timeout: 10s
       retries: 5
-      start_period: 10s
+      start_period: 30s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
 networks:
   chatbot-network:
@@ -79,5 +106,5 @@ networks:
 
 volumes:
   postgres_data:
-  backend_data:
+  backend_prod_data:
   backend_logs:

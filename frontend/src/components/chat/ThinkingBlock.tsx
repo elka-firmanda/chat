@@ -9,11 +9,11 @@ interface ThinkingBlockProps {
 }
 
 const agentColors = {
-  master: 'border-l-[#8b5cf6]',     // Purple
-  planner: 'border-l-[#3b82f6]',    // Blue
-  researcher: 'border-l-[#22c55e]', // Green
-  tools: 'border-l-[#f97316]',      // Orange
-  database: 'border-l-[#ec4899]'    // Pink
+  master: 'border-l-[#8b5cf6]',
+  planner: 'border-l-[#3b82f6]',
+  researcher: 'border-l-[#22c55e]',
+  tools: 'border-l-[#f97316]',
+  database: 'border-l-[#ec4899]'
 }
 
 const agentLabels = {
@@ -35,13 +35,13 @@ export default function ThinkingBlock({
     <Collapsible.Root 
       open={!collapsed} 
       onOpenChange={setCollapsed}
-      className={`border-l-4 ${agentColors[agent]} pl-4 my-2 rounded-r bg-muted/50`}
+      className={`border-l-4 ${agentColors[agent]} pl-3 sm:pl-4 my-2 rounded-r bg-muted/50`}
     >
-      <Collapsible.Trigger className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors w-full">
+      <Collapsible.Trigger className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors w-full min-h-[44px] px-2 -mx-2 rounded touch-manipulation">
         {collapsed ? (
-          <ChevronRight size={16} className="transition-transform" />
+          <ChevronRight size={16} className="transition-transform shrink-0" />
         ) : (
-          <ChevronDown size={16} className="transition-transform" />
+          <ChevronDown size={16} className="transition-transform shrink-0" />
         )}
         <span>{agentLabels[agent]} thinking</span>
       </Collapsible.Trigger>

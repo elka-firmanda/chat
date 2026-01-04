@@ -2,9 +2,10 @@
 Configuration management endpoints.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+import asyncio
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from app.config.config_manager import config_manager, get_config
 from app.config.schema import ConfigUpdate
@@ -13,9 +14,32 @@ from app.config.validate import (
     get_validation_cache_stats,
     clear_validation_cache,
 )
+from app.db.session import (
+    validate_database_connection,
+    switch_database,
+    get_database_info,
+    update_config_file,
+)
+from app.db.migration import migrate_sqlite_to_postgresql
 
 
 router = APIRouter()
+
+
+class DatabaseConfigUpdate(BaseModel):
+    """Database configuration update request."""
+
+    type: str
+    sqlite_path: str
+    postgresql_connection: str
+    pool_size: int
+
+
+class MigrationRequest(BaseModel):
+    """Database migration request."""
+
+    sqlite_path: str
+    postgresql_connection: str
 
 
 @router.get("")
@@ -178,3 +202,162 @@ async def clear_validation_cache_endpoint():
     """
     clear_validation_cache()
     return {"message": "Validation cache cleared successfully"}
+
+
+@router.post("/database/validate")
+async def validate_database_endpoint(update: DatabaseConfigUpdate):
+    """
+    Validate a database configuration without switching.
+
+    Tests the connection and returns success/failure with details.
+    """
+    is_valid, message = await validate_database_connection(
+        db_type=update.type,
+        connection_string=(
+            update.postgresql_connection
+            if update.type == "postgresql"
+            else update.sqlite_path
+        ),
+        pool_size=update.pool_size,
+    )
+
+    if is_valid:
+        return {
+            "valid": True,
+            "message": message,
+            "database_type": update.type,
+        }
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "valid": False,
+                "message": message,
+                "database_type": update.type,
+            },
+        )
+
+
+@router.post("/database/switch")
+async def switch_database_endpoint(
+    update: DatabaseConfigUpdate,
+    background_tasks: BackgroundTasks,
+):
+    """
+    Switch to a different database configuration.
+
+    This will:
+    1. Validate the connection
+    2. Update config.json
+    3. Initialize the new database connection
+    4. Create tables if needed
+
+    Warning: This switches the active database. Ensure you have backed up
+    your data before switching database types.
+    """
+    connection_string = (
+        update.postgresql_connection
+        if update.type == "postgresql"
+        else update.sqlite_path
+    )
+
+    is_valid, message = await validate_database_connection(
+        db_type=update.type,
+        connection_string=connection_string,
+        pool_size=update.pool_size,
+    )
+
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "valid": False,
+                "message": message,
+            },
+        )
+
+    update_config_file(
+        db_type=update.type,
+        sqlite_path=update.sqlite_path,
+        postgresql_connection=update.postgresql_connection,
+        pool_size=update.pool_size,
+    )
+
+    success, switch_message = await switch_database(
+        db_type=update.type,
+        connection_string=connection_string,
+        pool_size=update.pool_size,
+    )
+
+    if success:
+        return {
+            "valid": True,
+            "message": switch_message,
+            "database_type": update.type,
+            "config_updated": True,
+        }
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "valid": False,
+                "message": switch_message,
+            },
+        )
+
+
+@router.get("/database/info")
+async def get_database_info_endpoint():
+    """
+    Get information about the current database configuration.
+    """
+    return get_database_info()
+
+
+@router.post("/database/migrate")
+async def migrate_database_endpoint(
+    request: MigrationRequest, background_tasks: BackgroundTasks
+):
+    """
+    Migrate data from SQLite to PostgreSQL.
+
+    This will:
+    1. Read all data from the source SQLite database
+    2. Create the schema on the target PostgreSQL database
+    3. Copy all data to PostgreSQL
+
+    Note: This is a one-time migration. After migration, update your
+    database settings to use PostgreSQL as the active database.
+    """
+    sqlite_url = f"sqlite+aiosqlite:///{request.sqlite_path}"
+
+    try:
+        result = await migrate_sqlite_to_postgresql(
+            sqlite_url=sqlite_url,
+            postgresql_url=request.postgresql_connection,
+        )
+
+        if result["status"] == "completed":
+            return {
+                "success": True,
+                "message": "Migration completed successfully",
+                "details": result,
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "success": False,
+                    "message": f"Migration failed: {result.get('error', 'Unknown error')}",
+                    "details": result,
+                },
+            )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "message": f"Migration error: {str(e)}",
+            },
+        )

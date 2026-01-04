@@ -1,17 +1,17 @@
 # Agentic Chatbot
 
-A multi-agent chatbot system with deep research capabilities and a Claude-like UI.
+A multi-agent chatbot system with deep research capabilities and a Claude-like UI. Built with FastAPI, React, and LangGraph.
 
 ## Features
 
-- 🤖 Master agent orchestrating 4 specialized subagents
-- 🔍 Deep search with Tavily API and intelligent scraping
-- 💻 Code execution, calculations, and chart generation
-- 📊 Data warehouse querying
-- 📝 Conversation forking and session management
-- 🎨 Claude-inspired responsive UI with dark mode
-- ⚡ Real-time streaming updates (SSE)
-- 🔧 Full configuration via settings UI
+- **Multi-Agent Architecture**: Master agent orchestrates 4 specialized subagents (planner, researcher, tools, database)
+- **Deep Research**: Tavily API integration with intelligent web scraping and parallel URL processing
+- **Code Execution**: Sandboxed Python execution with RestrictedPython, chart generation with matplotlib/plotly
+- **Real-Time Streaming**: Server-Sent Events (SSE) for instant agent updates and progress visualization
+- **Conversation Management**: Session history, forking, searching, and PDF export
+- **Claude-Inspired UI**: Dark/light theme, collapsible thinking blocks, color-coded agent thoughts
+- **Full Configuration**: 7-tab settings modal for all agent parameters and API keys
+- **Multi-LLM Support**: Anthropic, OpenAI, and OpenRouter providers
 
 ## Quick Start
 
@@ -19,51 +19,127 @@ A multi-agent chatbot system with deep research capabilities and a Claude-like U
 
 - Python 3.11+
 - Bun 1.0+
-- API keys for at least one LLM provider
+- At least one LLM API key (Anthropic, OpenAI, or OpenRouter)
+- Tavily API key for deep search
 
-### Installation
+### Docker (Recommended)
 
 ```bash
-# Clone the repository
+# Clone and configure
 git clone <repo-url>
 cd agentic-chatbot
+cp .env.example .env
+# Edit .env with your API keys
 
-# Backend setup
+# Start services
+docker-compose up --build
+
+# Access:
+# Frontend: http://localhost:3000
+# Backend:  http://localhost:8000
+# API Docs: http://localhost:8000/docs
+```
+
+### Manual Setup
+
+```bash
+# Backend
 cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-
-# Frontend setup (new terminal)
-cd frontend
-bun install
-
-# Copy and configure environment
-cp .env.example .env
-cp config.json.example config.json
-# Edit .env and config.json with your API keys
-
-# Run migrations
-cd backend
+cp ../.env.example .env
+# Edit .env with API keys
 alembic upgrade head
-
-# Start backend
 uvicorn app.main:app --reload --port 8000
 
-# Start frontend (new terminal)
+# Frontend (new terminal)
 cd frontend
+bun install
 bun run dev
 ```
 
-### Docker
+## Project Structure
 
-```bash
-docker-compose up --build
+```
+agentic-chatbot/
+├── backend/
+│   ├── app/
+│   │   ├── main.py              # FastAPI entry point
+│   │   ├── agents/              # Agent system (master, planner, researcher, tools, database)
+│   │   ├── api/routes/          # API endpoints (chat, sessions, config, health)
+│   │   ├── config/              # Configuration management
+│   │   ├── db/                  # SQLAlchemy models and repositories
+│   │   ├── llm/                 # LLM provider abstraction
+│   │   └── tools/               # Tool implementations (tavily, scraper, code executor)
+│   └── requirements.txt
+├── frontend/
+│   └── src/
+│       ├── components/          # React components (chat, layout, settings)
+│       ├── hooks/               # Custom React hooks
+│       ├── stores/              # Zustand state stores
+│       └── services/            # API and SSE services
+├── docs/                        # Documentation
+│   ├── architecture.md          # System architecture guide
+│   ├── api.md                   # API documentation
+│   └── deployment.md            # Deployment guide
+├── docker/                      # Docker configuration
+├── config.json.example          # Configuration template
+└── .env.example                 # Environment template
 ```
 
 ## Documentation
 
-See [AGENTS.md](AGENTS.md) for detailed architecture and implementation guide.
+| Document | Description |
+|----------|-------------|
+| [docs/architecture.md](docs/architecture.md) | Agent system, working memory, state machine |
+| [docs/api.md](docs/api.md) | Complete API endpoint reference |
+| [docs/deployment.md](docs/deployment.md) | Docker, manual, and production deployment |
+| [AGENTS.md](AGENTS.md) | Development notes and implementation guide |
+
+## API Overview
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/chat/message` | POST | Send message, start agent |
+| `/api/v1/chat/stream/{id}` | GET | SSE stream for real-time updates |
+| `/api/v1/chat/fork/{id}` | POST | Fork conversation from message |
+| `/api/v1/sessions` | GET/POST | List/create sessions |
+| `/api/v1/sessions/search` | GET | Full-text search |
+| `/api/v1/config` | GET/POST | Configuration management |
+
+See [docs/api.md](docs/api.md) for complete documentation.
+
+## Configuration
+
+Edit `config.json` to customize:
+
+```json
+{
+  "general": {
+    "timezone": "auto",
+    "theme": "light"
+  },
+  "agents": {
+    "master": {
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20241022"
+    }
+  },
+  "profiles": {
+    "fast": { "master": {"model": "gpt-3.5-turbo"} },
+    "deep": { "researcher": {"max_urls_to_scrape": 10} }
+  }
+}
+```
+
+API keys should be set in `.env` using `${VAR}` syntax:
+
+```json
+"api_keys": {
+  "anthropic": "${ANTHROPIC_API_KEY}"
+}
+```
 
 ## License
 

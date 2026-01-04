@@ -268,14 +268,14 @@ function ApiKeyInput({
             onChange={(e) => handleChange(e.target.value)}
             onBlur={handleBlur}
             placeholder={placeholder || `Enter ${label.toLowerCase()}`}
-            className={`w-full px-3 py-2 bg-background border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
+            className={`w-full px-3 py-2.5 bg-background border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
               validationResult.valid === false ? 'border-red-500 focus:ring-red-500' : 'border-input'
             }`}
           />
           <button
             type="button"
             onClick={() => setShow(!show)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            className="absolute right-2 top-1/2 -translate-y-1/2 min-h-[36px] min-w-[36px] flex items-center justify-center text-muted-foreground hover:text-foreground"
           >
             {show ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
@@ -285,7 +285,7 @@ function ApiKeyInput({
             type="button"
             onClick={handleValidate}
             disabled={validating || value === lastValidatedKey}
-            className={`px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 ${
+            className={`px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors disabled:opacity-50 ${
               validationResult.valid === true 
                 ? 'bg-green-100 text-green-700 hover:bg-green-200' 
                 : validationResult.valid === false 
@@ -496,38 +496,36 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in" />
-        <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-background rounded-xl w-full max-w-3xl max-h-[85vh] overflow-hidden animate-in zoom-in-95">
-          {/* Header */}
+        <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in z-50" />
+        <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-background rounded-xl w-full max-w-3xl max-h-[85vh] overflow-hidden animate-in zoom-in-95 z-50 sm:max-w-3xl">
           <div className="flex items-center justify-between p-4 border-b">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-primary/10 rounded-lg">
+              <div className="p-2 bg-primary/10 rounded-lg shrink-0">
                 <SettingsIcon size={20} className="text-primary" />
               </div>
-              <div>
-                <Dialog.Title className="text-lg font-semibold">Settings</Dialog.Title>
-                <Dialog.Description className="text-sm text-muted-foreground">
+              <div className="min-w-0">
+                <Dialog.Title className="text-lg font-semibold truncate">Settings</Dialog.Title>
+                <Dialog.Description className="text-sm text-muted-foreground truncate">
                   Configure your chatbot preferences
                 </Dialog.Description>
               </div>
             </div>
             <Dialog.Close asChild>
-              <button className="p-2 hover:bg-muted rounded-lg transition-colors">
+              <button className="min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-muted rounded-lg transition-colors shrink-0 ml-2">
                 <X size={18} />
               </button>
             </Dialog.Close>
           </div>
 
-          {/* Profile Selector */}
           <div className="px-4 py-3 border-b bg-muted/30">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium">Profile:</span>
-              <div className="flex gap-1 bg-muted p-1 rounded-lg">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <span className="text-sm font-medium shrink-0">Profile:</span>
+              <div className="flex gap-1 bg-muted p-1 rounded-lg overflow-x-auto">
                 {PROFILES.map((p) => (
                   <button
                     key={p.value}
                     onClick={() => handleProfileChange(p.value)}
-                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                    className={`px-3 py-1.5 text-sm rounded-md transition-colors whitespace-nowrap ${
                       profile === p.value
                         ? 'bg-background shadow-sm text-foreground'
                         : 'text-muted-foreground hover:text-foreground'
@@ -540,95 +538,93 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
             </div>
           </div>
 
-          {/* Tabs */}
-          <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex">
-            {/* Tab List */}
-            <Tabs.List className="w-56 border-r p-2 space-y-1 bg-muted/30 overflow-y-auto max-h-[60vh]">
+          <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col sm:flex-row">
+            <Tabs.List className="w-full sm:w-48 border-b sm:border-r p-2 space-y-1 bg-muted/30 overflow-y-auto max-h-[30vh] sm:max-h-[60vh] shrink-0">
               <Tabs.Trigger
                 value="general"
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'general' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
                 <Globe size={16} />
-                General
+                <span className="truncate">General</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="database"
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'database' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
                 <Database size={16} />
-                Database
+                <span className="truncate">Database</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="master"
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'master' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
                 <Cpu size={16} />
-                Master Agent
+                <span className="truncate">Master</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="planner"
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'planner' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
                 <SettingsIcon size={16} />
-                Planner
+                <span className="truncate">Planner</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="researcher"
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'researcher' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
                 <Search size={16} />
-                Researcher
+                <span className="truncate">Researcher</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="tools"
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'tools' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
                 <Hammer size={16} />
-                Tools
+                <span className="truncate">Tools</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="database-agent"
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'database-agent' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
                 <Server size={16} />
-                Database Agent
+                <span className="truncate">Database</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="api-keys"
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'api-keys' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
                 <KeyIcon size={16} />
-                API Keys
+                <span className="truncate">API Keys</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="custom-tools"
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'custom-tools' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
                 <Wrench size={16} />
-                Custom Tools
+                <span className="truncate">Custom</span>
               </Tabs.Trigger>
             </Tabs.List>
 
             {/* Tab Content */}
-            <div className="flex-1 p-4 overflow-y-auto max-h-[60vh]">
+            <div className="flex-1 p-3 sm:p-4 overflow-y-auto max-h-[50vh] sm:max-h-[60vh]">
               <Tabs.Content value="general" className="space-y-4">
                 <div className="space-y-1">
                   <label className="block text-sm font-medium text-foreground">Timezone</label>
@@ -706,6 +702,9 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                       placeholder="postgresql://user:password@localhost:5432/chatbot"
                       className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Use format: postgresql://username:password@host:port/database
+                    </p>
                   </div>
                 )}
 
@@ -718,6 +717,33 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                     className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                 </div>
+
+                {config.database.type === 'sqlite' && config.database.postgresql_connection && (
+                  <div className="pt-4 border-t space-y-3">
+                    <h4 className="font-medium text-sm">Migrate to PostgreSQL</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Copy all data from SQLite to PostgreSQL before switching.
+                    </p>
+                    <button
+                      onClick={async () => {
+                        if (confirm('Migrate all data from SQLite to PostgreSQL? This cannot be undone.')) {
+                          const result = await useSettingsStore.getState().migrateDatabase(
+                            config.database.sqlite_path,
+                            config.database.postgresql_connection
+                          )
+                          if (result.success) {
+                            alert('Migration completed! You can now switch to PostgreSQL.')
+                          } else {
+                            alert(`Migration failed: ${result.message}`)
+                          }
+                        }
+                      }}
+                      className="px-3 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
+                    >
+                      Migrate Data to PostgreSQL
+                    </button>
+                  </div>
+                )}
               </Tabs.Content>
 
               <Tabs.Content value="master">
@@ -841,17 +867,16 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
             </div>
           </Tabs.Root>
 
-          {/* Footer */}
-          <div className="flex items-center justify-end gap-3 p-4 border-t bg-muted/30">
+          <div className="flex flex-col sm:flex-row items-center justify-end gap-3 p-4 border-t bg-muted/30">
             <Dialog.Close asChild>
-              <button className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+              <button className="w-full sm:w-auto px-4 py-2.5 min-h-[44px] text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
                 Cancel
               </button>
             </Dialog.Close>
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
               Save Changes

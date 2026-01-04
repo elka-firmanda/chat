@@ -69,29 +69,29 @@ export default function MessageComponent({ message }: MessageProps) {
   const thinkingContent = message.metadata?.thinking_content || "Processing..."
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} px-2 md:px-0 group`}>
-      <div className={`relative max-w-[85%] md:max-w-[80%] rounded-2xl px-4 py-3 md:px-5 ${
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} px-1 sm:px-2 md:px-0 group`}>
+      <div className={`relative max-w-[90%] sm:max-w-[85%] md:max-w-[80%] rounded-2xl px-3 py-2.5 sm:px-4 sm:py-3 ${
         isUser 
           ? 'bg-primary text-primary-foreground rounded-br-md' 
           : 'bg-muted rounded-bl-md'
       }`}>
         {!isUser && (
-          <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="absolute right-1.5 top-1.5 sm:right-2 sm:top-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
             <button
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 setShowContextMenu(!showContextMenu)
               }}
-              className="p-1 hover:bg-current/10 rounded transition-colors"
+              className="min-h-[36px] min-w-[36px] flex items-center justify-center hover:bg-current/10 rounded transition-colors"
               title="More options"
+              aria-label="More options"
             >
-              <MoreHorizontal size={14} />
+              <MoreHorizontal size={16} />
             </button>
           </div>
         )}
         
-        {/* Context menu dropdown */}
         {showContextMenu && (
           <div 
             ref={contextMenuRef}
@@ -99,17 +99,17 @@ export default function MessageComponent({ message }: MessageProps) {
           >
             <button
               onClick={handleCopy}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] text-sm hover:bg-accent transition-colors"
             >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? <Check size={16} /> : <Copy size={16} />}
               {copied ? 'Copied!' : 'Copy'}
             </button>
             <button
               onClick={handleFork}
               disabled={isForking}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors disabled:opacity-50"
+              className="w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] text-sm hover:bg-accent transition-colors disabled:opacity-50"
             >
-              <GitFork size={14} />
+              <GitFork size={16} />
               {isForking ? 'Forking...' : 'Fork'}
             </button>
           </div>
@@ -123,59 +123,23 @@ export default function MessageComponent({ message }: MessageProps) {
           />
         )}
         
-        {/* Context menu dropdown */}
-        {showContextMenu && (
-          <div 
-            ref={contextMenuRef}
-            className="absolute right-0 top-8 bg-popover border rounded-lg shadow-lg py-1 z-50 min-w-[120px]"
-          >
-            <button
-              onClick={handleCopy}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors"
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-              {copied ? 'Copied!' : 'Copy'}
-            </button>
-            <button
-              onClick={handleFork}
-              disabled={isForking}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors disabled:opacity-50"
-            >
-              <GitFork size={14} />
-              {isForking ? 'Forking...' : 'Fork'}
-            </button>
-          </div>
-        )}
-        
-        {/* Agent thinking block */}
-        {!isUser && message.agent_type && (
-          <ThinkingBlock 
-            agent={message.agent_type as any} 
-            content={thinkingContent}
-            defaultCollapsed={true}
-          />
-        )}
-        
-        {/* Message content */}
-        <div className="whitespace-pre-wrap text-sm md:text-base leading-relaxed">
+        <div className="whitespace-pre-wrap text-sm sm:text-base leading-relaxed">
           {message.content}
         </div>
         
-        {/* Actions bar */}
         {!isUser && (
           <div className="flex items-center gap-1 mt-2 pt-2 border-t border-current/10">
             <button
               onClick={handleCopy}
-              className="p-1.5 hover:bg-current/10 rounded transition-colors"
+              className="min-h-[36px] min-w-[36px] flex items-center justify-center hover:bg-current/10 rounded transition-colors"
               title="Copy message"
             >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? <Check size={16} /> : <Copy size={16} />}
             </button>
           </div>
         )}
         
-        {/* Timestamp */}
-        <div className={`text-[10px] md:text-xs mt-2 ${
+        <div className={`text-[10px] sm:text-xs mt-2 ${
           isUser ? 'text-primary-foreground/60' : 'text-muted-foreground'
         }`}>
           {message.created_at && new Date(message.created_at).toLocaleTimeString([], { 

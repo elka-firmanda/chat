@@ -11,7 +11,7 @@ export default function Header() {
     <>
       <button 
         onClick={toggleTheme}
-        className="p-2 rounded-lg hover:bg-accent transition-colors"
+        className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-accent transition-colors"
         title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
       >
         {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
@@ -19,7 +19,7 @@ export default function Header() {
       
       <button 
         onClick={() => setSettingsOpen(true)}
-        className="p-2 rounded-lg hover:bg-accent transition-colors"
+        className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-accent transition-colors"
         title="Settings"
       >
         <Settings size={18} />

@@ -1,13 +1,14 @@
-# Frontend Dockerfile (multi-stage build)
-FROM oven/bun:1.0 as builder
+# Frontend Dockerfile (multi-stage build with Bun and nginx)
+# Stage 1: Builder - install dependencies and build the application
+FROM oven/bun:1.0 AS builder
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better layer caching
 COPY frontend/package*.json ./
 
 # Install dependencies
-RUN bun install
+RUN bun install --frozen-lockfile
 
 # Copy source code
 COPY frontend/ .
@@ -15,16 +16,29 @@ COPY frontend/ .
 # Build the application
 RUN bun run build
 
-# Production stage - serve with nginx
-FROM nginx:alpine
+# Stage 2: Production - serve with nginx
+FROM nginx:alpine AS production
+
+# Copy nginx configuration
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy built assets
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy nginx config
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+# Create non-root user for security
+RUN chown -R nginx:nginx /usr/share/nginx/html && \
+    chown -R nginx:nginx /var/cache/nginx && \
+    chown -R nginx:nginx /var/log/nginx && \
+    touch /var/run/nginx.pid && \
+    chown -R nginx:nginx /var/run/nginx.pid
+
+USER nginx
 
 # Expose port
 EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

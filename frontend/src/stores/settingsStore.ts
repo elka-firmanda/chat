@@ -157,6 +157,55 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
     }
   },
   
+  validateDatabase: async (dbType, connectionString, poolSize) => {
+    try {
+      const response = await axios.post(`${API_URL}/v1/config/database/validate`, {
+        type: dbType,
+        sqlite_path: dbType === 'sqlite' ? connectionString : './data/chatbot.db',
+        postgresql_connection: dbType === 'postgresql' ? connectionString : '',
+        pool_size: poolSize
+      })
+      return { valid: response.data.valid, message: response.data.message }
+    } catch (error) {
+      const message = error.response?.data?.message || 'Validation failed'
+      return { valid: false, message }
+    }
+  },
+  
+  switchDatabase: async (dbType, connectionString, poolSize) => {
+    set({ isLoading: true, error: null })
+    try {
+      const response = await axios.post(`${API_URL}/v1/config/database/switch`, {
+        type: dbType,
+        sqlite_path: dbType === 'sqlite' ? connectionString : './data/chatbot.db',
+        postgresql_connection: dbType === 'postgresql' ? connectionString : '',
+        pool_size: poolSize
+      })
+      set({ isLoading: false })
+      return { success: true, message: response.data.message }
+    } catch (error) {
+      const message = error.response?.data?.message || 'Failed to switch database'
+      set({ isLoading: false, error: message })
+      return { success: false, message }
+    }
+  },
+  
+  migrateDatabase: async (sqlitePath, postgresqlConnection) => {
+    set({ isLoading: true, error: null })
+    try {
+      const response = await axios.post(`${API_URL}/v1/config/database/migrate`, {
+        sqlite_path: sqlitePath,
+        postgresql_connection: postgresqlConnection
+      })
+      set({ isLoading: false })
+      return response.data
+    } catch (error) {
+      const message = error.response?.data?.message || 'Migration failed'
+      set({ isLoading: false, error: message })
+      return { success: false, message }
+    }
+  },
+  
   applyProfile: async (profileName) => {
     set({ isLoading: true, error: null })
     try {

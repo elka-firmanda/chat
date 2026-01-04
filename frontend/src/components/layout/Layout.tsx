@@ -10,14 +10,12 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen bg-background text-foreground">
-      {/* Desktop Sidebar - hidden on mobile */}
-      <aside className="hidden lg:flex w-64 bg-secondary/50 flex-col border-r">
+      <aside className="hidden xl:flex w-64 bg-secondary/50 flex-col border-r shrink-0">
         <div className="flex-1 flex flex-col">
           <Outlet />
         </div>
       </aside>
 
-      {/* Mobile Drawer */}
       <SidebarDrawer
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -26,13 +24,12 @@ export default function Layout() {
         }}
       />
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Mobile Header */}
-        <header className="lg:hidden h-14 border-b flex items-center px-4 gap-2 bg-background">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <header className="xl:hidden h-14 border-b flex items-center px-3 sm:px-4 gap-2 bg-background shrink-0">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-2 hover:bg-accent rounded-lg transition-colors"
+            className="min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center rounded-lg hover:bg-accent transition-colors"
+            aria-label="Open menu"
           >
             <Menu size={20} />
           </button>
@@ -40,12 +37,10 @@ export default function Layout() {
           <Header />
         </header>
 
-        {/* Desktop Header - hidden on mobile */}
-        <header className="hidden lg:flex h-14 border-b items-center justify-end px-4 gap-2 bg-background">
+        <header className="hidden xl:flex h-14 border-b items-center justify-end px-4 gap-2 bg-background shrink-0">
           <Header />
         </header>
 
-        {/* Main Content Area */}
         <main className="flex-1 overflow-auto">
           <Outlet />
         </main>

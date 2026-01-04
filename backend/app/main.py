@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config.config_manager import config_manager
-from app.db.session import init_db
+from app.db.session import init_db, initialize_engine, get_database_info
 from app.api.routes import health, sessions, config, chat, tools
 
 
@@ -17,12 +17,15 @@ async def lifespan(app: FastAPI):
     """
     Application lifespan events.
     """
-    # Startup
     print("Starting Agentic Chatbot...")
 
-    # Initialize database
+    # Initialize database engine
+    initialize_engine()
+    print(f"Database engine initialized: {get_database_info()}")
+
+    # Initialize database tables
     await init_db()
-    print("Database initialized")
+    print("Database tables initialized")
 
     # Load configuration
     try:

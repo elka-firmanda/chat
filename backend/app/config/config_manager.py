@@ -6,26 +6,21 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 from dotenv import load_dotenv
+from functools import lru_cache
 
 from .schema import Config, ConfigUpdate
 from .settings import settings
 
 
 class ConfigManager:
-    """
-    Manages application configuration from config.json and .env files.
-
-    Priority order:
-    1. config.json (user settings)
-    2. .env (API keys, overrides)
-    """
-
     def __init__(self, config_path: str = "config.json", env_path: str = ".env"):
         self.config_path = Path(config_path)
         self.env_path = Path(env_path)
         self._config: Optional[Config] = None
+        self._config_cache: Optional[Config] = None
+        self._config_mtime: float = 0
         self._load_env()
 
     def _load_env(self) -> None:
@@ -33,13 +28,18 @@ class ConfigManager:
         if self.env_path.exists():
             load_dotenv(self.env_path)
 
+    def _is_cache_valid(self) -> bool:
+        if self._config_cache is None:
+            return False
+        try:
+            current_mtime = self.config_path.stat().st_mtime
+            return current_mtime == self._config_mtime
+        except (OSError, FileNotFoundError):
+            return False
+
     def load(self) -> Config:
-        """
-        Load configuration from config.json.
-        Automatically substitutes ${VAR} placeholders with environment variables.
-        """
-        if self._config is not None:
-            return self._config
+        if self._is_cache_valid():
+            return cast(Config, self._config_cache)
 
         if not self.config_path.exists():
             self._create_default_config()
@@ -47,11 +47,14 @@ class ConfigManager:
         with open(self.config_path, "r") as f:
             config_data = json.load(f)
 
-        # Substitute environment variables
         config_data = self._substitute_env_vars(config_data)
 
-        # Validate with Pydantic
         self._config = Config(**config_data)
+        self._config_cache = self._config
+        try:
+            self._config_mtime = self.config_path.stat().st_mtime
+        except OSError:
+            pass
         return self._config
 
     def _substitute_env_vars(self, obj: Any) -> Any:
@@ -96,20 +99,24 @@ class ConfigManager:
         """
         Save configuration to config.json.
         Keeps ${VAR} placeholders for API keys.
+        Invalidates cache after saving.
         """
         config_dict = config.model_dump()
 
-        # Replace actual API keys with placeholders
         api_keys = config_dict.get("api_keys", {})
         for key, value in api_keys.items():
             if value and not value.startswith("${"):
-                # Keep actual value if not in .env
                 pass
 
         with open(self.config_path, "w") as f:
             json.dump(config_dict, f, indent=2)
 
         self._config = config
+        self._config_cache = config
+        try:
+            self._config_mtime = self.config_path.stat().st_mtime
+        except OSError:
+            pass
 
     def update(self, update: ConfigUpdate) -> Config:
         """

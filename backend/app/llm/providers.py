@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Dict, List, Optional, Any
 from enum import Enum
+from functools import lru_cache
 import logging
 
 logger = logging.getLogger(__name__)
@@ -771,6 +772,8 @@ class LLMProviderFactory:
         ProviderType.OPENROUTER.value: OpenRouterProvider,
     }
 
+    _provider_cache: Dict[str, BaseLLMProvider] = {}
+
     @classmethod
     def register_provider(cls, provider_type: str, provider_class: type):
         """Register a new provider type."""
@@ -796,6 +799,10 @@ class LLMProviderFactory:
                 f"Unknown provider: {provider}. Supported providers: {list(cls._providers.keys())}"
             )
 
+        cache_key = f"{provider}:{model}:{max_tokens}:{temperature}"
+        if cache_key in cls._provider_cache:
+            return cls._provider_cache[cache_key]
+
         provider_class = cls._providers[provider]
         config = ProviderConfig(
             provider=provider,
@@ -808,7 +815,14 @@ class LLMProviderFactory:
             system_prompt=system_prompt,
         )
 
-        return provider_class(config)
+        instance = provider_class(config)
+        cls._provider_cache[cache_key] = instance
+        return instance
+
+    @classmethod
+    def clear_cache(cls):
+        """Clear the provider cache. Useful when API keys change."""
+        cls._provider_cache.clear()
 
     @classmethod
     def from_agent_config(

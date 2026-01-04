@@ -5,6 +5,7 @@ Chat repository for session and message operations.
 from typing import List, Optional, Dict, Any
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.db.models import ChatSession, Message, WorkingMemory, AgentStep
 import uuid
@@ -29,16 +30,21 @@ class ChatRepository:
         return session_obj
 
     async def get_session(self, session_id: str) -> Optional[ChatSession]:
-        """Get a session by ID."""
         result = await self.session.execute(
-            select(ChatSession).where(ChatSession.id == session_id)
+            select(ChatSession)
+            .options(
+                joinedload(ChatSession.messages),
+                joinedload(ChatSession.working_memory),
+                joinedload(ChatSession.agent_steps),
+            )
+            .where(ChatSession.id == session_id)
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
     async def get_sessions(
         self, archived: bool = False, limit: int = 50, offset: int = 0
     ) -> List[ChatSession]:
-        """Get list of sessions with pagination."""
         result = await self.session.execute(
             select(ChatSession)
             .where(ChatSession.archived == archived)
@@ -112,9 +118,9 @@ class ChatRepository:
     async def get_messages(
         self, session_id: str, limit: int = 30, offset: int = 0
     ) -> List[Message]:
-        """Get messages for a session with pagination."""
         result = await self.session.execute(
             select(Message)
+            .options(joinedload(Message.agent_steps))
             .where(Message.session_id == session_id)
             .order_by(Message.created_at.asc())
             .limit(limit)
