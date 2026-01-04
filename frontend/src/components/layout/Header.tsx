@@ -1,11 +1,14 @@
 import { Sun, Moon, Settings } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
+import { useState } from 'react'
+import SettingsModal from '../settings/SettingsModal'
 
 export default function Header() {
   const { theme, toggleTheme } = useTheme()
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
-    <header className="h-14 border-b flex items-center justify-end px-4 gap-2">
+    <>
       <button 
         onClick={toggleTheme}
         className="p-2 rounded-lg hover:bg-accent transition-colors"
@@ -15,11 +18,14 @@ export default function Header() {
       </button>
       
       <button 
+        onClick={() => setSettingsOpen(true)}
         className="p-2 rounded-lg hover:bg-accent transition-colors"
         title="Settings"
       >
         <Settings size={18} />
       </button>
-    </header>
+
+      <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+    </>
   )
 }
