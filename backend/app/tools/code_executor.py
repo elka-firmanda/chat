@@ -99,7 +99,7 @@ class CodeExecutor:
                 "_next_": next,
                 "_isinstance_": isinstance,
                 "_issubclass_": issubclass,
-                "_ hasattr_": hasattr,
+                "_hasattr_": hasattr,
                 "_repr_": repr,
             }
 

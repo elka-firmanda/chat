@@ -227,12 +227,16 @@ async def cancel_execution(session_id: str):
 
     Sends termination signal to the event queue.
     """
-    await event_manager.close(session_id)
+    from app.utils.shutdown import cancel_session_execution
+
+    success = await cancel_session_execution(session_id)
 
     return {
-        "status": "cancelled",
+        "status": "cancelled" if success else "error",
         "session_id": session_id,
-        "message": "Agent execution has been cancelled",
+        "message": "Agent execution has been cancelled"
+        if success
+        else "Failed to cancel session",
     }
 
 
