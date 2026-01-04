@@ -156,4 +156,53 @@ export const healthApi = {
   live: () => api.get('/health/live')
 }
 
+// Custom Tools APIs
+export interface CustomTool {
+  id: string
+  name: string
+  description: string | null
+  code: string
+  enabled: boolean
+  created_at: string | null
+}
+
+export interface ToolValidateResponse {
+  valid: boolean
+  error: string | null
+}
+
+export interface ToolExecuteResponse {
+  success: boolean
+  result: Record<string, unknown> | null
+  output: string | null
+  execution_time: number
+  error: string | null
+}
+
+export const toolsApi = {
+  list: (includeDisabled = false) =>
+    api.get<CustomTool[]>('/tools/custom', { params: { include_disabled: includeDisabled } }),
+  
+  get: (toolId: string) =>
+    api.get<CustomTool>(`/tools/custom/${toolId}`),
+  
+  create: (name: string, code: string, description?: string) =>
+    api.post<CustomTool>('/tools/custom', { name, code, description }),
+  
+  update: (toolId: string, data: { name?: string; code?: string; description?: string; enabled?: boolean }) =>
+    api.patch<CustomTool>(`/tools/custom/${toolId}`, data),
+  
+  delete: (toolId: string) =>
+    api.delete(`/tools/custom/${toolId}`),
+  
+  execute: (toolId: string, arguments: Record<string, unknown>) =>
+    api.post<ToolExecuteResponse>(`/tools/custom/${toolId}/execute`, { arguments }),
+  
+  validate: (code: string) =>
+    api.post<ToolValidateResponse>('/tools/validate', { code }),
+  
+  getTemplate: () =>
+    api.get<{ template: string }>('/tools/template')
+}
+
 export default api

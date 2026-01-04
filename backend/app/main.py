@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.config.config_manager import config_manager
 from app.db.session import init_db
-from app.api.routes import health, sessions, config, chat
+from app.api.routes import health, sessions, config, chat, tools
 
 
 @asynccontextmanager
@@ -62,6 +62,7 @@ app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
 app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
 app.include_router(config.router, prefix="/api/v1/config", tags=["config"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
+app.include_router(tools.router, prefix="/api/v1", tags=["tools"])
 
 
 @app.get("/")

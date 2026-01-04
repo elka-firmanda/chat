@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
 import * as Switch from '@radix-ui/react-switch'
-import { X, Check, AlertCircle, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon } from 'lucide-react'
+import { X, Check, AlertCircle, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon, Plus, Trash2, Edit, Play, Wrench } from 'lucide-react'
+import { toolsApi, type CustomTool } from '../../services/api'
 
 // Provider options
 const PROVIDERS = [
@@ -615,6 +616,15 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                 <KeyIcon size={16} />
                 API Keys
               </Tabs.Trigger>
+              <Tabs.Trigger
+                value="custom-tools"
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  activeTab === 'custom-tools' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <Wrench size={16} />
+                Custom Tools
+              </Tabs.Trigger>
             </Tabs.List>
 
             {/* Tab Content */}
@@ -824,6 +834,10 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                   </div>
                 </div>
               </Tabs.Content>
+
+              <Tabs.Content value="custom-tools">
+                <CustomToolsTab />
+              </Tabs.Content>
             </div>
           </Tabs.Root>
 
@@ -846,6 +860,294 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  )
+}
+
+function CustomToolsTab() {
+  const [tools, setTools] = useState<CustomTool[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showEditor, setShowEditor] = useState(false)
+  const [editingTool, setEditingTool] = useState<CustomTool | null>(null)
+  const [editorForm, setEditorForm] = useState({ name: '', description: '', code: '' })
+  const [validating, setValidating] = useState(false)
+  const [validationResult, setValidationResult] = useState<{ valid: boolean | null; error: string | null }>({ valid: null, error: null })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadTools = useCallback(async () => {
+    try {
+      setLoading(true)
+      const response = await toolsApi.list(true)
+      setTools(response.data)
+    } catch (err) {
+      setError('Failed to load tools')
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadTools()
+  }, [loadTools])
+
+  const handleNewTool = async () => {
+    try {
+      const templateResponse = await toolsApi.getTemplate()
+      setEditorForm({ name: '', description: '', code: templateResponse.data.template })
+      setEditingTool(null)
+      setValidationResult({ valid: null, error: null })
+      setShowEditor(true)
+    } catch (err) {
+      setError('Failed to load template')
+    }
+  }
+
+  const handleEditTool = (tool: CustomTool) => {
+    setEditorForm({ name: tool.name, description: tool.description || '', code: tool.code })
+    setEditingTool(tool)
+    setValidationResult({ valid: null, error: null })
+    setShowEditor(true)
+  }
+
+  const handleValidate = async () => {
+    setValidating(true)
+    setValidationResult({ valid: null, error: null })
+    try {
+      const response = await toolsApi.validate(editorForm.code)
+      setValidationResult({ valid: response.data.valid, error: response.data.error })
+    } catch (err) {
+      setValidationResult({ valid: false, error: 'Validation request failed' })
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const handleSave = async () => {
+    if (validationResult.valid !== true) {
+      setError('Please fix validation errors before saving')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      if (editingTool) {
+        await toolsApi.update(editingTool.id, editorForm)
+      } else {
+        await toolsApi.create(editorForm.name, editorForm.code, editorForm.description)
+      }
+      setShowEditor(false)
+      await loadTools()
+    } catch (err) {
+      setError(editingTool ? 'Failed to update tool' : 'Failed to create tool')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (toolId: string) => {
+    if (!confirm('Are you sure you want to delete this tool?')) return
+
+    try {
+      await toolsApi.delete(toolId)
+      await loadTools()
+    } catch (err) {
+      setError('Failed to delete tool')
+    }
+  }
+
+  const handleToggle = async (tool: CustomTool) => {
+    try {
+      await toolsApi.update(tool.id, { enabled: !tool.enabled })
+      await loadTools()
+    } catch (err) {
+      setError('Failed to toggle tool')
+    }
+  }
+
+  if (showEditor) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-medium flex items-center gap-2">
+            <Edit size={18} />
+            {editingTool ? 'Edit Tool' : 'New Tool'}
+          </h3>
+          <button
+            onClick={() => setShowEditor(false)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {error && (
+          <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-foreground">Tool Name</label>
+            <input
+              type="text"
+              value={editorForm.name}
+              onChange={(e) => setEditorForm({ ...editorForm, name: e.target.value })}
+              placeholder="my_custom_tool"
+              disabled={editingTool !== null}
+              className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-foreground">Description</label>
+            <input
+              type="text"
+              value={editorForm.description}
+              onChange={(e) => setEditorForm({ ...editorForm, description: e.target.value })}
+              placeholder="What does this tool do?"
+              className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-foreground">Python Code</label>
+              <button
+                onClick={handleValidate}
+                disabled={validating}
+                className="text-xs text-primary hover:underline flex items-center gap-1"
+              >
+                {validating ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                Validate
+              </button>
+            </div>
+            <textarea
+              value={editorForm.code}
+              onChange={(e) => setEditorForm({ ...editorForm, code: e.target.value })}
+              placeholder="def my_tool(arg1, arg2, **kwargs): ..."
+              rows={12}
+              className={`w-full px-3 py-2 bg-background border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary resize-none ${
+                validationResult.valid === false ? 'border-red-500' : 'border-input'
+              }`}
+            />
+            {validationResult.error && (
+              <p className="text-xs text-red-600">{validationResult.error}</p>
+            )}
+            {validationResult.valid === true && (
+              <p className="text-xs text-green-600 flex items-center gap-1">
+                <Check size={12} /> Code is valid
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-4 border-t">
+          <button
+            onClick={() => setShowEditor(false)}
+            className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || validationResult.valid !== true}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            {editingTool ? 'Update' : 'Create'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium flex items-center gap-2">
+          <Wrench size={18} />
+          Custom Tools
+        </h3>
+        <button
+          onClick={handleNewTool}
+          className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
+        >
+          <Plus size={16} />
+          New Tool
+        </button>
+      </div>
+
+      {error && (
+        <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 size={24} className="animate-spin text-muted-foreground" />
+        </div>
+      ) : tools.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          <Wrench size={48} className="mx-auto mb-3 opacity-50" />
+          <p>No custom tools yet</p>
+          <p className="text-sm">Create your first tool to extend the chatbot&apos;s capabilities</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {tools.map((tool) => (
+            <div
+              key={tool.id}
+              className={`flex items-center justify-between p-3 bg-muted/50 rounded-lg border ${
+                !tool.enabled ? 'opacity-60' : ''
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${tool.enabled ? 'bg-primary/10' : 'bg-muted'}`}>
+                  <Wrench size={16} className={tool.enabled ? 'text-primary' : 'text-muted-foreground'} />
+                </div>
+                <div>
+                  <p className="font-medium text-sm">{tool.name}</p>
+                  {tool.description && (
+                    <p className="text-xs text-muted-foreground">{tool.description}</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleToggle(tool)}
+                  className={`p-1.5 rounded transition-colors ${
+                    tool.enabled
+                      ? 'text-green-600 hover:bg-green-100'
+                      : 'text-muted-foreground hover:bg-muted'
+                  }`}
+                  title={tool.enabled ? 'Disable' : 'Enable'}
+                >
+                  {tool.enabled ? <Check size={16} /> : <X size={16} />}
+                </button>
+                <button
+                  onClick={() => handleEditTool(tool)}
+                  className="p-1.5 text-muted-foreground hover:bg-muted rounded transition-colors"
+                  title="Edit"
+                >
+                  <Edit size={16} />
+                </button>
+                <button
+                  onClick={() => handleDelete(tool.id)}
+                  className="p-1.5 text-red-600 hover:bg-red-100 rounded transition-colors"
+                  title="Delete"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
