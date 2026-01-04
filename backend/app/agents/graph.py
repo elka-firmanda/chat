@@ -8,7 +8,7 @@ Handles routing to subagents based on plan steps and manages working memory.
 import asyncio
 import uuid
 from datetime import datetime
-from typing import TypedDict, Annotated, List, Dict, Any, Optional, Union
+from typing import TypedDict, Annotated, List, Dict, Any, Optional, Union, AsyncIterator
 from enum import Enum
 from operator import add
 import logging
@@ -16,6 +16,12 @@ import logging
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
+from app.config.config_manager import get_config
+from app.llm.providers import (
+    BaseLLMProvider,
+    LLMProviderFactory,
+    StreamChunk,
+)
 from .memory import WorkingMemory, MemoryNode, AsyncWorkingMemory
 from .error_handler import (
     AgentError,
@@ -28,80 +34,186 @@ from .error_handler import (
     create_retry_sse_event,
     create_intervention_sse_event,
 )
+from .types import AgentState, AgentType, StepType, StepStatus
+
 
 logger = logging.getLogger(__name__)
 
-
-class AgentType(str, Enum):
-    """Agent type identifiers."""
-
-    MASTER = "master"
-    PLANNER = "planner"
-    RESEARCHER = "researcher"
-    TOOLS = "tools"
-    DATABASE = "database"
+_llm_provider: Optional[BaseLLMProvider] = None
 
 
-class StepType(str, Enum):
-    """Plan step types for routing."""
-
-    RESEARCH = "research"
-    CODE = "code"
-    DATABASE = "database"
-    CALCULATE = "calculate"
-    CHART = "chart"
-    THINK = "think"  # Master agent thinks directly
-    REVIEW = "review"  # Review and synthesize
-
-
-class StepStatus(str, Enum):
-    """Step execution status."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
+def get_llm_provider() -> BaseLLMProvider:
+    """Get or create the LLM provider for the master agent."""
+    global _llm_provider
+    if _llm_provider is None:
+        config = get_config()
+        api_keys: Dict[str, str] = {}
+        if config.api_keys.anthropic:
+            api_keys["anthropic"] = config.api_keys.anthropic
+        if config.api_keys.openai:
+            api_keys["openai"] = config.api_keys.openai
+        if config.api_keys.openrouter:
+            api_keys["openrouter"] = config.api_keys.openrouter
+        agent_config = config.agents.master.model_dump()
+        _llm_provider = LLMProviderFactory.from_agent_config(agent_config, api_keys)
+    return _llm_provider
 
 
-class AgentState(TypedDict):
+async def synthesize_response(
+    user_message: str,
+    subagent_results: Dict[str, Any],
+    working_memory: Dict[str, Any],
+) -> str:
     """
-    State for the LangGraph agent workflow.
+    Synthesize a final response using the LLM based on subagent results.
 
-    All fields are typed for LangGraph's StateGraph.
+    Args:
+        user_message: The original user message
+        subagent_results: Dictionary containing results from all subagents
+        working_memory: The working memory tree for context
+
+    Returns:
+        Synthesized response string
     """
+    provider = get_llm_provider()
 
-    # Core inputs
-    user_message: str
-    session_id: str
-    deep_search_enabled: bool
-    user_timezone: str
+    research_info = subagent_results.get("researcher_output", {})
+    tools_info = subagent_results.get("tools_output", {})
+    database_info = subagent_results.get("database_output", {})
 
-    # Working memory
-    working_memory: Dict[str, Any]
-    current_plan: List[Dict[str, Any]]
-    plan_version: int
-    active_step: int
+    context_parts = []
+    if research_info:
+        research_summary = research_info.get("summary", "")
+        findings = research_info.get("findings", [])
+        if research_summary:
+            context_parts.append(f"Research findings:\n{research_summary}")
+        if findings:
+            findings_text = "\n".join(f"- {f}" for f in findings[:10])
+            context_parts.append(f"Specific findings:\n{findings_text}")
 
-    # Agent outputs (shared state for results)
-    master_output: str
-    planner_output: Dict[str, Any]
-    researcher_output: Dict[str, Any]
-    tools_output: Dict[str, Any]
-    database_output: Dict[str, Any]
-    previous_step_output: Dict[str, Any]
+    if tools_info and tools_info.get("result"):
+        context_parts.append(f"Tool execution result: {tools_info['result']}")
 
-    # Control flow
-    requires_replan: bool
-    retry_count: int
-    error_log: List[Dict[str, Any]]
+    if database_info and database_info.get("results"):
+        row_count = database_info.get("row_count", 0)
+        results = database_info.get("results", [])
+        if row_count > 0:
+            sample = results[:5]
+            context_parts.append(
+                f"Database query returned {row_count} rows. Sample results:\n{sample}"
+            )
 
-    # Error handling and user intervention
-    awaiting_intervention: bool
-    intervention_action: Optional[str]
-    current_error: Optional[Dict[str, Any]]
+    context = (
+        "\n\n".join(context_parts)
+        if context_parts
+        else "No subagent results available."
+    )
 
-    # Final output
-    final_answer: str
+    system_prompt = """You are a master orchestrator for a multi-agent chatbot system.
+Your task is to synthesize a coherent, helpful response to the user's question based on
+results from specialized subagents (researcher, tools, database).
+
+Guidelines:
+- Provide a clear, concise answer directly addressing the user's question
+- Incorporate findings from research, tool executions, and database queries
+- Use a conversational but professional tone
+- If results are incomplete or unavailable, acknowledge this honestly
+- Format your response appropriately (bullets for lists, code blocks for code, etc.)
+- Keep responses focused and avoid unnecessary verbosity"""
+
+    messages = [
+        {
+            "role": "user",
+            "content": f"User question: {user_message}\n\nSubagent context:\n{context}\n\nPlease provide a synthesized response addressing the user's question.",
+        }
+    ]
+
+    response = await provider.complete(
+        messages=messages,
+        system_prompt=system_prompt,
+        temperature=0.7,
+        max_tokens=2048,
+    )
+
+    return response.content
+
+
+async def stream_synthesize_response(
+    user_message: str,
+    subagent_results: Dict[str, Any],
+    working_memory: Dict[str, Any],
+) -> AsyncIterator[StreamChunk]:
+    """
+    Stream a synthesized response using the LLM.
+
+    Args:
+        user_message: The original user message
+        subagent_results: Dictionary containing results from all subagents
+        working_memory: The working memory tree for context
+
+    Yields:
+        StreamChunk objects with response content
+    """
+    provider = get_llm_provider()
+
+    research_info = subagent_results.get("researcher_output", {})
+    tools_info = subagent_results.get("tools_output", {})
+    database_info = subagent_results.get("database_output", {})
+
+    context_parts = []
+    if research_info:
+        research_summary = research_info.get("summary", "")
+        findings = research_info.get("findings", [])
+        if research_summary:
+            context_parts.append(f"Research findings:\n{research_summary}")
+        if findings:
+            findings_text = "\n".join(f"- {f}" for f in findings[:10])
+            context_parts.append(f"Specific findings:\n{findings_text}")
+
+    if tools_info and tools_info.get("result"):
+        context_parts.append(f"Tool execution result: {tools_info['result']}")
+
+    if database_info and database_info.get("results"):
+        row_count = database_info.get("row_count", 0)
+        results = database_info.get("results", [])
+        if row_count > 0:
+            sample = results[:5]
+            context_parts.append(
+                f"Database query returned {row_count} rows. Sample results:\n{sample}"
+            )
+
+    context = (
+        "\n\n".join(context_parts)
+        if context_parts
+        else "No subagent results available."
+    )
+
+    system_prompt = """You are a master orchestrator for a multi-agent chatbot system.
+Your task is to synthesize a coherent, helpful response to the user's question based on
+results from specialized subagents (researcher, tools, database).
+
+Guidelines:
+- Provide a clear, concise answer directly addressing the user's question
+- Incorporate findings from research, tool executions, and database queries
+- Use a conversational but professional tone
+- If results are incomplete or unavailable, acknowledge this honestly
+- Format your response appropriately (bullets for lists, code blocks for code, etc.)
+- Keep responses focused and avoid unnecessary verbosity"""
+
+    messages = [
+        {
+            "role": "user",
+            "content": f"User question: {user_message}\n\nSubagent context:\n{context}\n\nPlease provide a synthesized response addressing the user's question.",
+        }
+    ]
+
+    async for chunk in provider.stream_complete(
+        messages=messages,
+        system_prompt=system_prompt,
+        temperature=0.7,
+        max_tokens=2048,
+    ):
+        yield chunk
 
 
 def create_initial_state(
@@ -137,19 +249,13 @@ def create_initial_state(
 
 
 async def master_agent(state: AgentState) -> AgentState:
-    """
-    Master agent node - orchestrates subagents based on plan.
-
-    This is the entry point and coordinator for all agent operations.
-    Handles re-planning when subagents discover new information.
-    """
+    """Master agent node - orchestrates subagents based on plan."""
     session_id = state["session_id"]
     deep_search = state["deep_search_enabled"]
     current_plan = state.get("current_plan", [])
     active_step = state.get("active_step", 0)
     previous_step_output = state.get("previous_step_output", {})
 
-    # Get or create working memory
     if not state.get("working_memory"):
         memory = AsyncWorkingMemory(session_id)
         state["working_memory"] = await memory.to_dict()
@@ -157,9 +263,7 @@ async def master_agent(state: AgentState) -> AgentState:
         memory = AsyncWorkingMemory(session_id)
         await memory.load(state["working_memory"])
 
-    # Check if re-planning was triggered by previous subagent
     if previous_step_output.get("requires_replan", False):
-        # Mark the triggering event in working memory
         trigger_node_id = await memory.add_node(
             agent=AgentType.MASTER.value,
             node_type="replan_trigger",
@@ -174,7 +278,6 @@ async def master_agent(state: AgentState) -> AgentState:
             },
         )
 
-        # Mark current plan as superseded
         await memory.add_node(
             agent=AgentType.PLANNER.value,
             node_type="plan_superseded",
@@ -188,12 +291,10 @@ async def master_agent(state: AgentState) -> AgentState:
             },
         )
 
-        # Increment plan version for new plan
         state["plan_version"] = state.get("plan_version", 1) + 1
         state["requires_replan"] = True
         state["previous_step_output"] = {}
 
-        # Add master thought about re-planning
         await memory.add_node(
             agent=AgentType.MASTER.value,
             node_type="thought",
@@ -204,62 +305,79 @@ async def master_agent(state: AgentState) -> AgentState:
         state["working_memory"] = await memory.to_dict()
         return state
 
-    # Add master thought
     node_id = await memory.add_node(
         agent=AgentType.MASTER.value,
         node_type="thought",
         description="Master agent evaluating next step",
     )
 
-    # Casual chat mode - no orchestration needed
     if not deep_search or not current_plan:
-        # Direct response without subagents
         await memory.update_node(
             node_id, completed=True, status=StepStatus.COMPLETED.value
         )
 
-        # Add final answer node
+        subagent_results = {
+            "researcher_output": state.get("researcher_output", {}),
+            "tools_output": state.get("tools_output", {}),
+            "database_output": state.get("database_output", {}),
+        }
+        synthesized_response = await synthesize_response(
+            user_message=state["user_message"],
+            subagent_results=subagent_results,
+            working_memory=state.get("working_memory", {}),
+        )
+
         await memory.add_node(
             agent=AgentType.MASTER.value,
             node_type="result",
             description="Final response generated",
-            content=state.get("master_output", state["user_message"]),
+            content=synthesized_response,
         )
 
         state["working_memory"] = await memory.to_dict()
-        state["final_answer"] = state.get("master_output", state["user_message"])
+        state["final_answer"] = synthesized_response
+        state["master_output"] = synthesized_response
         return state
 
-    # Check if we need re-planning
     if state.get("requires_replan", False):
         await memory.update_node(
             node_id,
             content="Re-planning triggered by subagent findings",
             completed=True,
         )
-        # Will route to planner
         state["working_memory"] = await memory.to_dict()
         return state
 
-    # Check if plan is complete
     if active_step >= len(current_plan):
-        # Plan complete - synthesize final answer
         await memory.update_node(
             node_id, completed=True, status=StepStatus.COMPLETED.value
+        )
+
+        subagent_results = {
+            "researcher_output": state.get("researcher_output", {}),
+            "tools_output": state.get("tools_output", {}),
+            "database_output": state.get("database_output", {}),
+        }
+
+        synthesized_response = await synthesize_response(
+            user_message=state["user_message"],
+            subagent_results=subagent_results,
+            working_memory=state.get("working_memory", {}),
         )
 
         await memory.add_node(
             agent=AgentType.MASTER.value,
             node_type="result",
-            description="All steps completed - finalizing answer",
-            content="Plan execution complete",
+            description="All steps completed - final response synthesized",
+            content=synthesized_response,
         )
 
         state["working_memory"] = await memory.to_dict()
+        state["final_answer"] = synthesized_response
+        state["master_output"] = synthesized_response
         state["requires_replan"] = False
         return state
 
-    # Get current step and route to appropriate agent
     current_step = current_plan[active_step]
     step_type = current_step.get("type", StepType.THINK.value)
 
@@ -269,14 +387,11 @@ async def master_agent(state: AgentState) -> AgentState:
         completed=True,
     )
 
-    # Check if this step can run with subsequent steps in parallel
     parallel_indices = StepAnalyzer.find_parallel_batch(current_plan, active_step)
 
     if len(parallel_indices) > 1:
-        # Execute steps in parallel
         return await execute_steps_parallel(state, parallel_indices, memory)
 
-    # Single step - create step node and continue with sequential execution
     step_node_id = await memory.add_node(
         agent=AgentType.MASTER.value,
         node_type="step",
@@ -288,29 +403,21 @@ async def master_agent(state: AgentState) -> AgentState:
     state["working_memory"] = await memory.to_dict()
     state["active_step"] = active_step
 
-    # Route based on step type
-    # This will be handled by conditional edges in the graph
     return state
 
 
 async def planner_agent(state: AgentState) -> AgentState:
-    """
-    Planner agent - creates and modifies execution plans.
-
-    Returns a structured plan with steps, or modifies existing plan for re-planning.
-    """
+    """Planner agent - creates and modifies execution plans."""
     session_id = state["session_id"]
     user_message = state["user_message"]
     plan_version = state.get("plan_version", 1)
     current_plan = state.get("current_plan", [])
     requires_replan = state.get("requires_replan", False)
 
-    # Get working memory
     memory = AsyncWorkingMemory(session_id)
     if state.get("working_memory"):
         await memory.load(state["working_memory"])
 
-    # Add planner thought
     node_id = await memory.add_node(
         agent=AgentType.PLANNER.value,
         node_type="thought",
@@ -320,10 +427,7 @@ async def planner_agent(state: AgentState) -> AgentState:
         parent_id="root",
     )
 
-    # For initial planning
     if not current_plan or requires_replan:
-        # Create plan based on user message
-        # In production, this would call the LLM
         plan = await _generate_plan(
             user_message=user_message,
             deep_search=state["deep_search_enabled"],
@@ -331,7 +435,6 @@ async def planner_agent(state: AgentState) -> AgentState:
             research_findings=state.get("researcher_output", {}),
         )
 
-        # Create plan node
         plan_node_id = await memory.add_node(
             agent=AgentType.PLANNER.value,
             node_type="result",
@@ -340,7 +443,6 @@ async def planner_agent(state: AgentState) -> AgentState:
             content=plan,
         )
 
-        # Create step nodes for each plan step
         for i, step in enumerate(plan):
             await memory.add_node(
                 agent=AgentType.PLANNER.value,
@@ -367,14 +469,90 @@ async def _generate_plan(
     previous_plan: Optional[List[Dict]] = None,
     research_findings: Optional[Dict] = None,
 ) -> List[Dict[str, Any]]:
-    """Generate a plan using LLM (simplified version)."""
-    # In production, this would call the LLM to generate a structured plan
-    # For now, return a simple plan structure
+    """Generate a plan using LLM based on the user message and context."""
+    provider = get_llm_provider()
 
-    plan = []
+    context_parts = []
+    if previous_plan:
+        context_parts.append(f"Previous plan that needs revision:\n{previous_plan}")
+    if research_findings:
+        summary = research_findings.get("summary", "")
+        findings = research_findings.get("findings", [])
+        if summary:
+            context_parts.append(
+                f"Research findings that may affect planning:\n{summary}"
+            )
+        if findings:
+            context_parts.append(
+                f"Key findings:\n{chr(10).join(f'- {f}' for f in findings[:5])}"
+            )
 
-    # Always start with understanding the request
-    plan.append(
+    context = "\n\n".join(context_parts) if context_parts else "No previous context."
+
+    is_replan = previous_plan is not None
+
+    system_prompt = """You are a planning agent for a multi-agent chatbot system.
+Your task is to create a step-by-step execution plan to answer the user's question.
+
+Available agent types:
+- researcher: Search the web for information using Tavily API
+- tools: Execute Python code, calculations, or generate charts
+- database: Query a data warehouse for structured data
+- master: Direct thinking and response synthesis
+
+Guidelines:
+- Create a concise plan with 2-5 steps maximum
+- Only include steps that are necessary to answer the question
+- For simple questions, skip research and just use direct synthesis
+- For complex questions, break down into research, analysis, and synthesis steps
+- Use "think" step type for direct master agent reasoning
+- Use "review" step type for final synthesis before responding
+
+Return your plan as a JSON array of steps with the following structure:
+[
+  {
+    "type": "think|research|code|database|calculate|chart|review",
+    "description": "Brief description of the step",
+    "agent": "master|researcher|tools|database",
+    "query": "optional query for research steps",
+    "code": "optional code for execution steps"
+  }
+]"""
+
+    messages = [
+        {
+            "role": "user",
+            "content": f"""User question: {user_message}
+
+Planning context:
+{context}
+
+Planning mode: {"Re-planning" if is_replan else "Initial planning"}
+Deep search enabled: {deep_search}
+
+Please create a JSON execution plan.""",
+        }
+    ]
+
+    response = await provider.complete(
+        messages=messages,
+        system_prompt=system_prompt,
+        temperature=0.3,
+        max_tokens=1024,
+    )
+
+    import json
+
+    try:
+        plan = json.loads(response.content)
+        if isinstance(plan, list):
+            return plan
+    except json.JSONDecodeError:
+        pass
+
+    fallback_plan = []
+
+    fallback_plan.append(
         {
             "type": StepType.THINK.value,
             "description": "Analyze user request",
@@ -383,8 +561,7 @@ async def _generate_plan(
     )
 
     if deep_search:
-        # Add research step
-        plan.append(
+        fallback_plan.append(
             {
                 "type": StepType.RESEARCH.value,
                 "description": "Research information on the topic",
@@ -393,8 +570,7 @@ async def _generate_plan(
             }
         )
 
-    # Add thought/review step
-    plan.append(
+    fallback_plan.append(
         {
             "type": StepType.REVIEW.value,
             "description": "Review and synthesize findings",
@@ -402,35 +578,27 @@ async def _generate_plan(
         }
     )
 
-    return plan
+    return fallback_plan
 
 
 async def researcher_agent(state: AgentState) -> AgentState:
-    """
-    Researcher agent - searches and scrapes information.
-
-    Uses Tavily API for search and parallel scraping for content.
-    Sets requires_replan flag when findings indicate plan needs updating.
-    """
+    """Researcher agent - searches and scrapes information."""
     from .researcher import default_researcher
 
     session_id = state["session_id"]
     current_step = state.get("current_plan", [])[state.get("active_step", 0)]
     query = current_step.get("query", state["user_message"])
 
-    # Get working memory
     memory = AsyncWorkingMemory(session_id)
     if state.get("working_memory"):
         await memory.load(state["working_memory"])
 
-    # Add researcher thought
     node_id = await memory.add_node(
         agent=AgentType.RESEARCHER.value,
         node_type="thought",
         description=f"Researching: {query[:50]}...",
     )
 
-    # Run real research using the researcher module
     research_output = await default_researcher.research(
         query=query,
         session_id=session_id,
@@ -441,7 +609,6 @@ async def researcher_agent(state: AgentState) -> AgentState:
         },
     )
 
-    # Build structured output for state
     output = {
         "query": research_output.get("query", query),
         "results": research_output.get("search_results", []),
@@ -453,7 +620,6 @@ async def researcher_agent(state: AgentState) -> AgentState:
         "replan_reason": research_output.get("replan_reason"),
     }
 
-    # Update node with results
     await memory.update_node(
         node_id,
         content=output,
@@ -463,7 +629,6 @@ async def researcher_agent(state: AgentState) -> AgentState:
 
     state["researcher_output"] = output
 
-    # If re-planning is needed, set up previous_step_output for master
     if output.get("requires_replan", False):
         state["previous_step_output"] = {
             "requires_replan": True,
@@ -482,77 +647,25 @@ async def researcher_agent(state: AgentState) -> AgentState:
 
 
 async def tools_agent(state: AgentState) -> AgentState:
-    """
-    Tools agent - executes code, calculations, and generates charts.
+    """Tools agent - executes code, calculations, and generates charts."""
+    from .tools import tools_agent as execute_tools
 
-    Uses RestrictedPython sandbox for safe code execution.
-    """
-    session_id = state["session_id"]
-    current_step = state.get("current_plan", [])[state.get("active_step", 0)]
-    step_type = current_step.get("type", "code")
-
-    # Get working memory
-    memory = AsyncWorkingMemory(session_id)
-    if state.get("working_memory"):
-        await memory.load(state["working_memory"])
-
-    # Add tools thought
-    node_id = await memory.add_node(
-        agent=AgentType.TOOLS.value,
-        node_type="thought",
-        description=f"Executing {step_type} operation",
-    )
-
-    # In production, this would:
-    # 1. Parse the step type (code, calculate, chart)
-    # 2. Execute in RestrictedPython sandbox
-    # 3. Capture output and errors
-
-    tools_output = {
-        "type": step_type,
-        "result": None,
-        "stdout": "",
-        "stderr": "",
-        "execution_time_ms": 0,
-    }
-
-    await memory.update_node(
-        node_id,
-        content=tools_output,
-        completed=True,
-        status=StepStatus.COMPLETED.value,
-    )
-
-    state["tools_output"] = tools_output
-    state["working_memory"] = await memory.to_dict()
-
-    return state
+    return await execute_tools(state)
 
 
 async def database_agent(state: AgentState) -> AgentState:
-    """
-    Database agent - queries data warehouse.
-
-    Executes SQL queries and returns structured results.
-    """
+    """Database agent - queries data warehouse."""
     session_id = state["session_id"]
 
-    # Get working memory
     memory = AsyncWorkingMemory(session_id)
     if state.get("working_memory"):
         await memory.load(state["working_memory"])
 
-    # Add database thought
     node_id = await memory.add_node(
         agent=AgentType.DATABASE.value,
         node_type="thought",
         description="Processing database query",
     )
-
-    # In production, this would:
-    # 1. Parse query requirements
-    # 2. Execute against data warehouse
-    # 3. Return structured results
 
     database_output = {
         "query": "",
@@ -574,13 +687,9 @@ async def database_agent(state: AgentState) -> AgentState:
     return state
 
 
-# ==================== Parallel Execution ====================
-
-
 class StepAnalyzer:
     """Analyzes plan steps to determine which can run in parallel."""
 
-    # Steps that can run in parallel with same-type steps
     PARALLEL_COMPATIBLE = {
         StepType.RESEARCH.value,
         StepType.CODE.value,
@@ -589,7 +698,6 @@ class StepAnalyzer:
         StepType.CHART.value,
     }
 
-    # Steps that must run sequentially (produce/consume shared state)
     SEQUENTIAL_ONLY = {
         StepType.REVIEW.value,
         StepType.THINK.value,
@@ -597,25 +705,15 @@ class StepAnalyzer:
 
     @staticmethod
     def can_run_parallel(step1: Dict[str, Any], step2: Dict[str, Any]) -> bool:
-        """
-        Determine if two steps can run in parallel.
-
-        Steps can run parallel if:
-        1. Both are compatible types (not review/think)
-        2. Neither has a depends_on pointing to the other
-        3. They don't have conflicting resource requirements
-        """
         type1 = step1.get("type", "")
         type2 = step2.get("type", "")
 
-        # Sequential-only steps must run alone
         if (
             type1 in StepAnalyzer.SEQUENTIAL_ONLY
             or type2 in StepAnalyzer.SEQUENTIAL_ONLY
         ):
             return False
 
-        # Check dependency constraints
         dep1 = step1.get("depends_on")
         dep2 = step2.get("step_number")
         if dep1 is not None and dep1 == dep2:
@@ -626,11 +724,9 @@ class StepAnalyzer:
         if dep1 is not None and dep1 == dep2:
             return False
 
-        # Different agent types can run in parallel
         agent1 = step1.get("agent", "")
         agent2 = step2.get("agent", "")
 
-        # Same agent type can run parallel (e.g., multiple research steps)
         if agent1 == agent2 and agent1 in [
             AgentType.RESEARCHER.value,
             AgentType.TOOLS.value,
@@ -638,7 +734,6 @@ class StepAnalyzer:
         ]:
             return True
 
-        # Different agents can run parallel if no shared state dependencies
         if agent1 != agent2:
             return True
 
@@ -648,28 +743,15 @@ class StepAnalyzer:
     def find_parallel_batch(
         plan: List[Dict[str, Any]], start_step: int, max_batch_size: int = 3
     ) -> List[int]:
-        """
-        Find a batch of steps that can run in parallel starting from start_step.
-
-        Args:
-            plan: The execution plan
-            start_step: Index to start looking from
-            max_batch_size: Maximum number of parallel steps
-
-        Returns:
-            List of step indices that can run in parallel
-        """
         if start_step >= len(plan):
             return []
 
         batch = [start_step]
         current_step = plan[start_step]
 
-        # REVIEW and THINK steps must run alone
         if current_step.get("type") in StepAnalyzer.SEQUENTIAL_ONLY:
             return batch
 
-        # Look ahead for parallel-compatible steps
         for i in range(start_step + 1, len(plan)):
             if len(batch) >= max_batch_size:
                 break
@@ -684,11 +766,9 @@ class StepAnalyzer:
             next_step = plan[i]
             next_type = next_step.get("type", "")
 
-            # REVIEW and THINK break the parallel batch
             if next_type in StepAnalyzer.SEQUENTIAL_ONLY:
                 break
 
-            # Check if this step can run in parallel with all in batch
             can_parallelize = True
             for batch_idx in batch:
                 if not StepAnalyzer.can_run_parallel(plan[batch_idx], next_step):
@@ -706,24 +786,16 @@ async def execute_steps_parallel(
     step_indices: List[int],
     memory: AsyncWorkingMemory,
 ) -> AgentState:
-    """
-    Execute multiple steps in parallel using asyncio.gather().
+    """Execute multiple steps in parallel using asyncio.gather()."""
+    from .tools import tools_agent as execute_tools_agent
+    from .researcher import researcher_agent
 
-    Args:
-        state: Current agent state
-        step_indices: List of step indices to execute
-        memory: Working memory instance
-
-    Returns:
-        Updated state with all parallel results merged
-    """
     session_id = state["session_id"]
     plan = state.get("current_plan", [])
 
     if not step_indices or step_indices[0] >= len(plan):
         return state
 
-    # Create parallel batch node in working memory
     batch_node_id = await memory.add_node(
         agent=AgentType.MASTER.value,
         node_type="parallel_batch",
@@ -734,14 +806,11 @@ async def execute_steps_parallel(
         },
     )
 
-    # Create coroutines for each step
     async def run_single_step(step_idx: int) -> Dict[str, Any]:
-        """Run a single step and return its result."""
         step = plan[step_idx]
         step_type = step.get("type", StepType.THINK.value)
         step_description = step.get("description", f"Step {step_idx + 1}")
 
-        # Create step node
         step_node_id = await memory.add_node(
             agent=AgentType.MASTER.value,
             node_type="step",
@@ -754,18 +823,16 @@ async def execute_steps_parallel(
             },
         )
 
-        # Route to appropriate agent based on step type
         step_state = state.copy()
         step_state["active_step"] = step_idx
         step_state["working_memory"] = await memory.to_dict()
 
-        # Execute the appropriate agent
         agent_functions = {
             StepType.RESEARCH.value: researcher_agent,
-            StepType.CODE.value: tools_agent,
+            StepType.CODE.value: execute_tools_agent,
             StepType.DATABASE.value: database_agent,
-            StepType.CALCULATE.value: tools_agent,
-            StepType.CHART.value: tools_agent,
+            StepType.CALCULATE.value: execute_tools_agent,
+            StepType.CHART.value: execute_tools_agent,
         }
 
         agent_func = agent_functions.get(step_type, master_agent)
@@ -773,7 +840,6 @@ async def execute_steps_parallel(
         try:
             result_state = await agent_func(step_state)
 
-            # Mark step node as completed
             await memory.update_node(
                 step_node_id,
                 completed=True,
@@ -793,7 +859,6 @@ async def execute_steps_parallel(
                 "error": None,
             }
         except Exception as e:
-            # Mark step node as failed
             await memory.update_node(
                 step_node_id,
                 completed=True,
@@ -814,15 +879,11 @@ async def execute_steps_parallel(
                 "error": str(e),
             }
 
-    # Run all steps in parallel
     tasks = [run_single_step(idx) for idx in step_indices]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Process results and merge into state
     for result in results:
-        # Handle exceptions from asyncio.gather
         if isinstance(result, BaseException):
-            # Log exception but continue with other results
             state["error_log"].append(
                 {
                     "type": "parallel_execution",
@@ -835,11 +896,8 @@ async def execute_steps_parallel(
         if isinstance(result, dict) and result.get("success") and result.get("state"):
             result_state = result["state"]
 
-            # Merge outputs from each agent into main state
             for key in ["researcher_output", "tools_output", "database_output"]:
                 if key in result_state and result_state[key]:
-                    # For parallel results, we need to merge them
-                    # Use the last successful result or combine intelligently
                     existing = state.get(key, [])
                     new_output = result_state[key]
 
@@ -847,10 +905,8 @@ async def execute_steps_parallel(
                         existing.append(new_output)
                         state[key] = existing
                     elif isinstance(existing, dict):
-                        # Merge dictionaries, preserving existing data
                         state[key] = {**existing, **new_output}
 
-    # Mark batch as completed
     await memory.update_node(
         batch_node_id,
         completed=True,
@@ -864,7 +920,6 @@ async def execute_steps_parallel(
         },
     )
 
-    # Update active_step to after the parallel batch
     state["active_step"] = max(step_indices) + 1
     state["working_memory"] = await memory.to_dict()
 
@@ -872,29 +927,21 @@ async def execute_steps_parallel(
 
 
 def route_step(state: AgentState) -> str:
-    """
-    Route to the next agent based on current step type.
-
-    This is the conditional edge function for LangGraph.
-    """
+    """Route to the next agent based on current step type."""
     current_plan = state.get("current_plan", [])
     active_step = state.get("active_step", 0)
     requires_replan = state.get("requires_replan", False)
     deep_search = state.get("deep_search_enabled", False)
 
-    # Check for re-planning
     if requires_replan:
         return "planner"
 
-    # Check if plan is complete
     if not current_plan or active_step >= len(current_plan):
         return "master"
 
-    # Check for casual chat (no plan)
     if not deep_search or not current_plan:
         return "master"
 
-    # Route based on step type
     current_step = current_plan[active_step]
     step_type = current_step.get("type", StepType.THINK.value)
 
@@ -912,20 +959,14 @@ def route_step(state: AgentState) -> str:
 
 
 def should_continue(state: AgentState) -> str:
-    """
-    Determine if execution should continue or end.
-
-    Returns "continue" to stay in graph, or "end" to exit.
-    """
+    """Determine if execution should continue or end."""
     current_plan = state.get("current_plan", [])
     active_step = state.get("active_step", 0)
     final_answer = state.get("final_answer", "")
 
-    # Check if we have a final answer
     if final_answer:
         return END
 
-    # Check if plan is complete
     if active_step >= len(current_plan):
         return END
 
@@ -933,25 +974,17 @@ def should_continue(state: AgentState) -> str:
 
 
 def create_agent_graph() -> StateGraph:
-    """
-    Create the LangGraph state machine.
-
-    Returns a compiled StateGraph ready for execution.
-    """
-    # Create the state graph
+    """Create the LangGraph state machine."""
     workflow = StateGraph(AgentState)
 
-    # Add nodes
     workflow.add_node("master", master_agent)
     workflow.add_node("planner", planner_agent)
     workflow.add_node("researcher", researcher_agent)
     workflow.add_node("tools", tools_agent)
     workflow.add_node("database", database_agent)
 
-    # Set entry point
     workflow.set_entry_point("master")
 
-    # Add conditional routing from master
     workflow.add_conditional_edges(
         "master",
         route_step,
@@ -964,19 +997,16 @@ def create_agent_graph() -> StateGraph:
         },
     )
 
-    # Add edges from other agents back to master
     workflow.add_edge("planner", "master")
     workflow.add_edge("researcher", "master")
     workflow.add_edge("tools", "master")
     workflow.add_edge("database", "master")
 
-    # Add checkpointer for state persistence
     checkpointer = MemorySaver()
 
-    # Compile the graph
-    app = workflow.compile(checkpointer=checkpointer)
+    compiled_app = workflow.compile(checkpointer=checkpointer)
 
-    return app
+    return compiled_app
 
 
 async def run_agent_workflow(
@@ -985,18 +1015,7 @@ async def run_agent_workflow(
     deep_search: bool = False,
     user_timezone: str = "UTC",
 ) -> Dict[str, Any]:
-    """
-    Run the agent workflow and return results.
-
-    Args:
-        user_message: The user's input message
-        session_id: Unique session identifier
-        deep_search: Whether to use deep search mode
-        user_timezone: User's configured timezone for context
-
-    Returns:
-        Final state with answer and working memory
-    """
+    """Run the agent workflow and return results."""
     from app.utils.datetime import get_user_timezone_context
 
     timezone_context = get_user_timezone_context(user_timezone)
@@ -1019,13 +1038,13 @@ async def run_agent_workflow(
     final_state = await app.aget_state(config)
 
     if final_state:
-        state_dict = dict(final_state.values)
+        state_dict: Dict[str, Any] = dict(final_state.values)
         state_dict["timezone_context"] = timezone_context
         return state_dict
 
-    initial_state["timezone_context"] = timezone_context
-    return initial_state
+    result: Dict[str, Any] = dict(initial_state)
+    result["timezone_context"] = timezone_context
+    return result
 
 
-# Export the graph as 'app' for compatibility with imports
 app = create_agent_graph()

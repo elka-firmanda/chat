@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .graph import AgentState, StepType
+from .types import AgentState, StepType
 from .error_handler import AgentError, ErrorType
 from app.tools import (
     execute_code as execute_code_tool,
