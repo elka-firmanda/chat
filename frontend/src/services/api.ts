@@ -41,6 +41,32 @@ const api = axios.create({
   }
 })
 
+export interface SearchResult {
+  session_id: string
+  session_title: string
+  message_content: string | null
+  created_at: string | null
+  highlighted_content: string | null
+  message_id?: string
+  role?: string
+  agent_type?: string
+  type: 'session' | 'message'
+}
+
+export interface SearchResponse {
+  query: string
+  results: SearchResult[]
+  total: number
+  time_ms: number
+  search_type: string
+  message?: string
+}
+
+export interface SessionExportResponse {
+  filename: string
+  data: Blob
+}
+
 // Session APIs
 export const sessionsApi = {
   list: (archived = false, limit = 50, offset = 0) =>
@@ -58,8 +84,13 @@ export const sessionsApi = {
   delete: (sessionId: string) =>
     api.delete(`/sessions/${sessionId}`),
   
-  search: (query: string, limit = 20) =>
-    api.get('/sessions/search', { params: { q: query, limit } })
+  search: (query: string, limit = 20, type: 'all' | 'sessions' | 'messages' = 'all') =>
+    api.get<SearchResponse>('/sessions/search', { params: { q: query, limit, type } }),
+
+  export: (sessionId: string) =>
+    api.get(`/sessions/${sessionId}/export`, {
+      responseType: 'blob'
+    })
 }
 
 // Chat APIs

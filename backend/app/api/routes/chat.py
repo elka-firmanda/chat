@@ -337,6 +337,16 @@ async def fork_conversation(
             )
             fork_count += 1
 
+    # Copy working memory from original session
+    working_memory = await repo.get_working_memory(original_message.session_id)
+    if working_memory:
+        await repo.save_working_memory(
+            session_id=new_session.id,
+            memory_tree=working_memory.memory_tree,
+            timeline=working_memory.timeline,
+            index_map=working_memory.index_map,
+        )
+
     return {
         "new_session_id": new_session.id,
         "forked_from_message_id": message_id,
@@ -394,4 +404,84 @@ async def get_chat_history(
             "limit": limit,
             "offset": offset,
         },
+    }
+
+
+class InterventionRequest(BaseModel):
+    """Request model for user intervention."""
+
+    action: str  # 'retry', 'skip', 'abort'
+
+
+@router.post("/intervene/{session_id}")
+async def handle_intervention(
+    session_id: str,
+    request: InterventionRequest,
+):
+    """
+    Handle user intervention for a session.
+
+    Allows user to retry, skip, or abort after error.
+    """
+    from app.agents.error_handler import (
+        InterventionAction,
+        get_intervention_state,
+        clear_intervention_state,
+    )
+
+    intervention_state = get_intervention_state(session_id)
+
+    if not intervention_state.awaiting_response:
+        return {
+            "status": "error",
+            "message": "No pending intervention for this session",
+            "session_id": session_id,
+        }
+
+    # Map action string to InterventionAction
+    action_map = {
+        "retry": InterventionAction.RETRY,
+        "skip": InterventionAction.SKIP,
+        "abort": InterventionAction.ABORT,
+    }
+
+    action = action_map.get(request.action.lower())
+    if not action:
+        return {
+            "status": "error",
+            "message": f"Invalid action: {request.action}. Must be 'retry', 'skip', or 'abort'",
+            "session_id": session_id,
+        }
+
+    # Set the intervention response
+    intervention_state.set_response(action)
+
+    return {
+        "status": "success",
+        "message": f"Intervention '{request.action}' recorded",
+        "session_id": session_id,
+        "action": request.action,
+    }
+
+
+@router.get("/intervention/{session_id}")
+async def get_intervention_status(session_id: str):
+    """
+    Get the current intervention status for a session.
+
+    Returns whether the session is awaiting user intervention.
+    """
+    from app.agents.error_handler import get_intervention_state
+
+    intervention_state = get_intervention_state(session_id)
+
+    return {
+        "session_id": session_id,
+        "awaiting_response": intervention_state.awaiting_response,
+        "pending_error": intervention_state.pending_error.to_dict()
+        if intervention_state.pending_error
+        else None,
+        "available_actions": ["retry", "skip", "abort"]
+        if intervention_state.awaiting_response
+        else [],
     }

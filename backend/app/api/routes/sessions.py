@@ -3,11 +3,13 @@ Session management endpoints.
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.db.repositories.chat import ChatRepository
+from app.tools.pdf_exporter import export_session_to_pdf
 from pydantic import BaseModel
 
 
@@ -150,24 +152,139 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/search")
-async def search_sessions(q: str, limit: int = 20, db: AsyncSession = Depends(get_db)):
+async def search_sessions(
+    q: str,
+    limit: int = 20,
+    type: str = "all",  # 'all', 'sessions', 'messages'
+    db: AsyncSession = Depends(get_db),
+):
     """
-    Search sessions and messages.
+    Search sessions and messages with full-text search.
+
+    - q: Search query string
+    - limit: Maximum number of results (default 20, max 100)
+    - type: Search type - 'all' (default), 'sessions' (title only), 'messages' (content only)
+
+    Returns matching sessions with highlighted snippets for fast, relevant results.
+    Performance target: <100ms for typical queries.
     """
+    import time
+
+    start_time = time.time()
+
+    # Validate and sanitize query
+    if not q or len(q.strip()) < 2:
+        return {
+            "query": q,
+            "results": [],
+            "total": 0,
+            "time_ms": round((time.time() - start_time) * 1000, 2),
+            "message": "Query must be at least 2 characters",
+        }
+
+    query = q.strip()
+    limit = min(limit, 100)  # Cap at 100 for performance
+
     repo = ChatRepository(db)
-    results = await repo.search_messages(q, limit=limit)
+
+    # Search based on type
+    if type == "sessions":
+        # Search session titles only (faster)
+        sessions = await repo.search_sessions_by_title(query, limit=limit)
+        results = [
+            {
+                "session_id": s.id,
+                "session_title": s.title,
+                "message_content": None,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "highlighted_content": None,
+                "type": "session",
+            }
+            for s in sessions
+        ]
+    else:
+        # Search messages with FTS5 (default)
+        raw_results = await repo.search_messages(query, limit=limit)
+
+        # Transform results with highlighting
+        seen_sessions = set()
+        results = []
+        for message, session, highlighted in raw_results:
+            # Deduplicate by session (show first match per session)
+            if session.id in seen_sessions:
+                continue
+            seen_sessions.add(session.id)
+
+            results.append(
+                {
+                    "session_id": session.id,
+                    "session_title": session.title,
+                    "message_content": message.content[:200],
+                    "created_at": message.created_at.isoformat()
+                    if message.created_at
+                    else None,
+                    "highlighted_content": highlighted,
+                    "message_id": message.id,
+                    "role": message.role,
+                    "agent_type": message.agent_type,
+                    "type": "message",
+                }
+            )
+
+    elapsed_ms = round((time.time() - start_time) * 1000, 2)
 
     return {
-        "query": q,
-        "results": [
+        "query": query,
+        "results": results,
+        "total": len(results),
+        "time_ms": elapsed_ms,
+        "search_type": type,
+    }
+
+
+@router.get("/{session_id}/export")
+async def export_session(
+    session_id: str,
+    format: str = "pdf",
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export a session to PDF format.
+    Returns the PDF file as a downloadable response.
+    """
+    repo = ChatRepository(db)
+    session = await repo.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get all messages for the session
+    messages = await repo.get_messages(session_id, limit=1000, offset=0)
+
+    # Prepare session data
+    session_data = {
+        "id": session.id,
+        "title": session.title or "Untitled Session",
+        "created_at": session.created_at.isoformat() if session.created_at else None,
+        "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+        "messages": [
             {
-                "session_id": session.id,
-                "session_title": session.title,
-                "message_content": message.content[:200],  # Truncate
-                "created_at": message.created_at.isoformat()
-                if message.created_at
-                else None,
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "agent_type": m.agent_type,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+                "metadata": m.extra_data,
             }
-            for message, session in results
+            for m in messages
         ],
     }
+
+    # Generate PDF
+    filename, pdf_bytes = export_session_to_pdf(session_data)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

@@ -33,6 +33,9 @@ numpy>=1.26.3
 # SSE
 sse-starlette>=1.8.2
 
+# PDF Export
+reportlab>=4.0.0
+
 # Utilities
 pydantic>=2.6.0
 pydantic-settings>=2.1.0
