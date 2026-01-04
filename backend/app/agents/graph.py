@@ -76,6 +76,7 @@ class AgentState(TypedDict):
     researcher_output: Dict[str, Any]
     tools_output: Dict[str, Any]
     database_output: Dict[str, Any]
+    previous_step_output: Dict[str, Any]
 
     # Control flow
     requires_replan: bool
@@ -105,6 +106,7 @@ def create_initial_state(
         researcher_output={},
         tools_output={},
         database_output={},
+        previous_step_output={},
         requires_replan=False,
         retry_count=0,
         error_log=[],
@@ -117,11 +119,13 @@ async def master_agent(state: AgentState) -> AgentState:
     Master agent node - orchestrates subagents based on plan.
 
     This is the entry point and coordinator for all agent operations.
+    Handles re-planning when subagents discover new information.
     """
     session_id = state["session_id"]
     deep_search = state["deep_search_enabled"]
     current_plan = state.get("current_plan", [])
     active_step = state.get("active_step", 0)
+    previous_step_output = state.get("previous_step_output", {})
 
     # Get or create working memory
     if not state.get("working_memory"):
@@ -130,6 +134,53 @@ async def master_agent(state: AgentState) -> AgentState:
     else:
         memory = AsyncWorkingMemory(session_id)
         await memory.load(state["working_memory"])
+
+    # Check if re-planning was triggered by previous subagent
+    if previous_step_output.get("requires_replan", False):
+        # Mark the triggering event in working memory
+        trigger_node_id = await memory.add_node(
+            agent=AgentType.MASTER.value,
+            node_type="replan_trigger",
+            description=f"Re-plan triggered by {previous_step_output.get('triggered_by', 'subagent')}",
+            triggered_by=previous_step_output.get("triggering_node_id"),
+            content={
+                "reason": previous_step_output.get(
+                    "replan_reason", "New information requires plan update"
+                ),
+                "findings_summary": previous_step_output.get("findings_summary", ""),
+                "plan_version": state.get("plan_version", 1),
+            },
+        )
+
+        # Mark current plan as superseded
+        await memory.add_node(
+            agent=AgentType.PLANNER.value,
+            node_type="plan_superseded",
+            description=f"Plan v{state.get('plan_version', 1)} superseded by re-planning",
+            triggered_by=trigger_node_id,
+            content={
+                "superseded_version": state.get("plan_version", 1),
+                "reason": previous_step_output.get(
+                    "replan_reason", "New information requires plan update"
+                ),
+            },
+        )
+
+        # Increment plan version for new plan
+        state["plan_version"] = state.get("plan_version", 1) + 1
+        state["requires_replan"] = True
+        state["previous_step_output"] = {}
+
+        # Add master thought about re-planning
+        await memory.add_node(
+            agent=AgentType.MASTER.value,
+            node_type="thought",
+            description=f"Re-planning (v{state['plan_version']}) based on new findings",
+            parent_id=trigger_node_id,
+        )
+
+        state["working_memory"] = await memory.to_dict()
+        return state
 
     # Add master thought
     node_id = await memory.add_node(
@@ -330,7 +381,10 @@ async def researcher_agent(state: AgentState) -> AgentState:
     Researcher agent - searches and scrapes information.
 
     Uses Tavily API for search and parallel scraping for content.
+    Sets requires_replan flag when findings indicate plan needs updating.
     """
+    from .researcher import default_researcher
+
     session_id = state["session_id"]
     current_step = state.get("current_plan", [])[state.get("active_step", 0)]
     query = current_step.get("query", state["user_message"])
@@ -347,29 +401,52 @@ async def researcher_agent(state: AgentState) -> AgentState:
         description=f"Researching: {query[:50]}...",
     )
 
-    # In production, this would:
-    # 1. Call Tavily API for search results
-    # 2. Select top N URLs
-    # 3. Scrape URLs in parallel
-    # 4. Extract and clean content
+    # Run real research using the researcher module
+    research_output = await default_researcher.research(
+        query=query,
+        session_id=session_id,
+        deep_search=state.get("deep_search_enabled", False),
+        context={
+            "original_plan": state.get("current_plan", []),
+            "working_memory": state.get("working_memory", {}),
+        },
+    )
 
-    # Simulated research output
-    research_output = {
-        "query": query,
-        "results": [],
-        "sources": [],
-        "findings": "Research completed",
-        "requires_replan": False,  # Set to True if unexpected findings
+    # Build structured output for state
+    output = {
+        "query": research_output.get("query", query),
+        "results": research_output.get("search_results", []),
+        "scraped_content": research_output.get("scraped_content", []),
+        "findings": research_output.get("findings", []),
+        "sources": research_output.get("sources", []),
+        "summary": research_output.get("research_summary", ""),
+        "requires_replan": research_output.get("requires_replan", False),
+        "replan_reason": research_output.get("replan_reason"),
     }
 
+    # Update node with results
     await memory.update_node(
         node_id,
-        content=research_output,
+        content=output,
         completed=True,
         status=StepStatus.COMPLETED.value,
     )
 
-    state["researcher_output"] = research_output
+    state["researcher_output"] = output
+
+    # If re-planning is needed, set up previous_step_output for master
+    if output.get("requires_replan", False):
+        state["previous_step_output"] = {
+            "requires_replan": True,
+            "triggered_by": "researcher",
+            "triggering_node_id": node_id,
+            "replan_reason": output.get(
+                "replan_reason", "Research found unexpected information"
+            ),
+            "findings_summary": output.get("summary", ""),
+            "findings": output.get("findings", []),
+        }
+
     state["working_memory"] = await memory.to_dict()
 
     return state
