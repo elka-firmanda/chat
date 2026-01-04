@@ -43,6 +43,9 @@ interface ConfigState {
   loadConfig: () => Promise<void>
   updateConfig: (updates: Partial<ConfigState>) => Promise<void>
   validateApiKey: (provider: string, apiKey: string) => Promise<boolean>
+  validateDatabase: (dbType: string, connectionString: string, poolSize: number) => Promise<{ valid: boolean; message: string }>
+  switchDatabase: (dbType: string, connectionString: string, poolSize: number) => Promise<{ success: boolean; message: string }>
+  migrateDatabase: (sqlitePath: string, postgresqlConnection: string) => Promise<{ success: boolean; message: string }>
   applyProfile: (profileName: string) => Promise<void>
 }
 

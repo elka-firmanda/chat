@@ -514,9 +514,38 @@ class AsyncWorkingMemory:
     Uses asyncio lock for async context.
     """
 
-    def __init__(self, session_id: Optional[str] = None):
+    def __init__(
+        self,
+        session_id: Optional[str] = None,
+        event_queue: Optional["asyncio.Queue"] = None,
+    ):
         self._memory = WorkingMemory(session_id)
         self._lock = asyncio.Lock()
+        self._event_queue = event_queue
+
+    def _get_agent_for_event(self, agent: str) -> str:
+        agent_mapping = {
+            "master": "master",
+            "planner": "planner",
+            "researcher": "researcher",
+            "tools": "tools",
+            "database": "database",
+        }
+        return agent_mapping.get(agent, "master")
+
+    async def _emit_thought_event(
+        self, agent: str, description: str, content: Any = None
+    ):
+        if self._event_queue:
+            await self._event_queue.put(
+                {
+                    "event": "thought",
+                    "data": {
+                        "agent": self._get_agent_for_event(agent),
+                        "content": description if content is None else str(content),
+                    },
+                }
+            )
 
     async def add_node(
         self,
@@ -528,9 +557,8 @@ class AsyncWorkingMemory:
         content: Optional[Any] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Add a new node (async)."""
         async with self._lock:
-            return self._memory.add_node(
+            node_id = self._memory.add_node(
                 agent=agent,
                 node_type=node_type,
                 description=description,
@@ -539,6 +567,9 @@ class AsyncWorkingMemory:
                 content=content,
                 metadata=metadata,
             )
+            if node_type == "thought":
+                await self._emit_thought_event(agent, description, content)
+            return node_id
 
     async def update_node(
         self,

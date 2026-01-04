@@ -3,12 +3,23 @@ LangGraph State Machine for Agent Orchestration
 
 Implements the master agent orchestration using LangGraph's StateGraph.
 Handles routing to subagents based on plan steps and manages working memory.
+Supports streaming working memory updates via SSE.
 """
 
 import asyncio
 import uuid
 from datetime import datetime
-from typing import TypedDict, Annotated, List, Dict, Any, Optional, Union, AsyncIterator
+from typing import (
+    TypedDict,
+    Annotated,
+    List,
+    Dict,
+    Any,
+    Optional,
+    Union,
+    AsyncIterator,
+    Callable,
+)
 from enum import Enum
 from operator import add
 import logging
@@ -1021,6 +1032,239 @@ async def run_agent_workflow(
     timezone_context = get_user_timezone_context(user_timezone)
 
     app = create_agent_graph()
+
+    initial_state = create_initial_state(
+        user_message=user_message,
+        session_id=session_id,
+        deep_search_enabled=deep_search,
+        user_timezone=user_timezone,
+    )
+
+    config = {"configurable": {"thread_id": session_id}}
+
+    final_state = None
+    async for chunk in app.astream_events(initial_state, config, version="v1"):
+        pass
+
+    final_state = await app.aget_state(config)
+
+    if final_state:
+        state_dict: Dict[str, Any] = dict(final_state.values)
+        state_dict["timezone_context"] = timezone_context
+        return state_dict
+
+    result: Dict[str, Any] = dict(initial_state)
+    result["timezone_context"] = timezone_context
+    return result
+
+
+async def run_agent_workflow_with_streaming(
+    user_message: str,
+    session_id: str,
+    deep_search: bool = False,
+    user_timezone: str = "UTC",
+    event_manager: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Run the agent workflow with streaming working memory updates and message chunks.
+
+    Args:
+        user_message: User's message
+        session_id: Session identifier
+        deep_search: Whether to use deep search
+        user_timezone: User's timezone for context
+        event_manager: Optional event manager for SSE streaming
+
+    Returns:
+        Final state from agent execution
+    """
+    from app.utils.datetime import get_user_timezone_context
+
+    timezone_context = get_user_timezone_context(user_timezone)
+
+    app = create_agent_graph()
+
+    initial_state = create_initial_state(
+        user_message=user_message,
+        session_id=session_id,
+        deep_search_enabled=deep_search,
+        user_timezone=user_timezone,
+    )
+
+    config = {"configurable": {"thread_id": session_id}}
+
+    if event_manager:
+        await event_manager.emit_thought(
+            session_id=session_id,
+            agent="master",
+            content="Starting agent workflow",
+        )
+
+        await event_manager.emit_memory_update(
+            session_id=session_id,
+            memory_tree={},
+            timeline=[{
+                "node_id": "root",
+                "agent": "master",
+                "node_type": "root",
+                "description": "Session started",
+                "status": "running",
+                "timestamp": datetime.utcnow().isoformat(),
+            }],
+            index={},
+            update_type="full",
+        )
+
+    final_state = None
+    async for chunk in app.astream_events(initial_state, config, version="v1"):
+        if event_manager:
+            await _process_graph_event(chunk, session_id, event_manager)
+
+    final_state = await app.aget_state(config)
+
+    if final_state:
+        state_dict: Dict[str, Any] = dict(final_state.values)
+        state_dict["timezone_context"] = timezone_context
+
+        if event_manager:
+            working_memory = state_dict.get("working_memory", {})
+            await event_manager.emit_memory_update(
+                session_id=session_id,
+                memory_tree=working_memory.get("tree", {}),
+                timeline=working_memory.get("timeline", []),
+                index=working_memory.get("index", {}),
+                update_type="full",
+            )
+
+            subagent_results = {
+                "researcher_output": state_dict.get("researcher_output", {}),
+                "tools_output": state_dict.get("tools_output", {}),
+                "database_output": state_dict.get("database_output", {}),
+            }
+
+            accumulated_content = ""
+            async for chunk in stream_synthesize_response(
+                user_message=user_message,
+                subagent_results=subagent_results,
+                working_memory=working_memory,
+            ):
+                if chunk.delta:
+                    accumulated_content += chunk.delta
+                    await event_manager.emit_message_chunk(
+                        session_id=session_id,
+                        content=accumulated_content,
+                        delta=chunk.delta,
+                        is_complete=chunk.is_complete,
+                    )
+
+            if not accumulated_content:
+                accumulated_content = state_dict.get("final_answer", "")
+
+            state_dict["final_answer"] = accumulated_content
+
+        return state_dict
+
+    result: Dict[str, Any] = dict(initial_state)
+    result["timezone_context"] = timezone_context
+    return result
+
+
+async def _process_graph_event(
+    chunk: Dict[str, Any],
+    session_id: str,
+    event_manager: Any,
+) -> None:
+    """
+    Process LangGraph events and emit SSE events.
+
+    Args:
+        chunk: LangGraph event chunk
+        session_id: Session identifier
+        event_manager: SSE event manager
+    """
+    event_type = chunk.get("event", "")
+
+    if event_type == "on_chain_start":
+        name = chunk.get("name", "")
+        data = chunk.get("data", {})
+
+        if name == "master":
+            await event_manager.emit_thought(
+                session_id=session_id,
+                agent="master",
+                content="Master agent started",
+            )
+        elif name == "planner":
+            await event_manager.emit_thought(
+                session_id=session_id,
+                agent="planner",
+                content="Planner agent started",
+            )
+        elif name == "researcher":
+            await event_manager.emit_thought(
+                session_id=session_id,
+                agent="researcher",
+                content="Researcher agent started",
+            )
+        elif name == "tools":
+            await event_manager.emit_thought(
+                session_id=session_id,
+                agent="tools",
+                content="Tools agent started",
+            )
+        elif name == "database":
+            await event_manager.emit_thought(
+                session_id=session_id,
+                agent="database",
+                content="Database agent started",
+            )
+
+    elif event_type == "on_chain_end":
+        name = chunk.get("name", "")
+        data = chunk.get("data", {})
+
+        if name == "master" and "output" in data:
+            output = data["output"]
+            if isinstance(output, dict) and output.get("final_answer"):
+                await event_manager.emit_complete(
+                    session_id=session_id,
+                    message_id="",
+                    final_answer=output.get("final_answer", ""),
+                )
+
+    elif event_type == "on_chat_model_start":
+        await event_manager.emit_thought(
+            session_id=session_id,
+            agent=chunk.get("metadata", {}).get("agent", "unknown"),
+            content="Generating response...",
+        )
+
+    elif event_type == "on_chat_model_stream":
+        pass
+
+    elif event_type == "on_tool_start":
+        tool_name = chunk.get("name", "")
+        input_data = chunk.get("input", {})
+        query = input_data.get("query", "") if isinstance(input_data, dict) else str(input_data)
+
+        await event_manager.emit_thought(
+            session_id=session_id,
+            agent="tools",
+            content=f"Executing: {tool_name}",
+        )
+
+    elif event_type == "on_tool_end":
+        tool_name = chunk.get("name", "")
+        output = chunk.get("output", "")
+
+        await event_manager.emit_thought(
+            session_id=session_id,
+            agent="tools",
+            content=f"Completed: {tool_name}",
+        )
+
+
+app = create_agent_graph()
 
     initial_state = create_initial_state(
         user_message=user_message,

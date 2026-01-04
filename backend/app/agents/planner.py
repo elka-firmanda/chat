@@ -9,6 +9,8 @@ from typing import Dict, List, Any, Optional
 import json
 import logging
 
+from app.config.config_manager import get_config
+from app.llm.providers import LLMProviderFactory, BaseLLMProvider
 from .memory import AsyncWorkingMemory
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,28 @@ class StepType:
     CHART = "chart"
     THINK = "think"
     REVIEW = "review"
+
+
+_planner_llm_provider: Optional[BaseLLMProvider] = None
+
+
+def get_planner_llm_provider() -> BaseLLMProvider:
+    """Get or create the LLM provider for the planner agent."""
+    global _planner_llm_provider
+    if _planner_llm_provider is None:
+        config = get_config()
+        api_keys: Dict[str, str] = {}
+        if config.api_keys.anthropic:
+            api_keys["anthropic"] = config.api_keys.anthropic
+        if config.api_keys.openai:
+            api_keys["openai"] = config.api_keys.openai
+        if config.api_keys.openrouter:
+            api_keys["openrouter"] = config.api_keys.openrouter
+        agent_config = config.agents.planner.model_dump()
+        _planner_llm_provider = LLMProviderFactory.from_agent_config(
+            agent_config, api_keys
+        )
+    return _planner_llm_provider
 
 
 # System prompt for the planner agent
@@ -309,8 +333,8 @@ Analyze the findings and create an updated plan. Keep valid steps from the previ
         return new_plan
 
 
-# Default planner instance
-default_planner = Planner()
+# Default planner instance with LLM provider
+default_planner = Planner(llm_provider=get_planner_llm_provider())
 
 
 async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:

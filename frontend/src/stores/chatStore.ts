@@ -9,6 +9,7 @@ export interface Message {
   created_at: string
   metadata?: Record<string, unknown> & {
     thinking_content?: string
+    thoughts?: Array<{ agent: string; content: string }>
   }
 }
 
@@ -50,6 +51,7 @@ interface ChatState {
   updateAgentStep: (messageId: string, stepId: string, updates: Partial<AgentStep>) => void
   toggleDeepSearch: () => void
   setLoading: (loading: boolean) => void
+  addThought: (sessionId: string, agent: string, content: string) => void
 }
 
 export const useChatStore = create<ChatState>()(
@@ -124,7 +126,37 @@ export const useChatStore = create<ChatState>()(
       toggleDeepSearch: () => set((state) => ({
         isDeepSearchEnabled: !state.isDeepSearchEnabled
       })),
-      setLoading: (loading) => set({ isLoading: loading })
+      setLoading: (loading) => set({ isLoading: loading }),
+      addThought: (sessionId, agent, content) => set((state) => {
+        const sessionMessages = state.messages[sessionId] || []
+        if (sessionMessages.length === 0) return state
+
+        const lastMessage = sessionMessages[sessionMessages.length - 1]
+        if (lastMessage.role !== 'assistant') return state
+
+        const thoughts = lastMessage.metadata?.thoughts || []
+        const newThought = { agent, content }
+        const updatedThoughts = [...thoughts, newThought]
+        const thinkingContent = updatedThoughts
+          .map(t => `[${t.agent}] ${t.content}`)
+          .join('\n\n')
+
+        const updatedLastMessage = {
+          ...lastMessage,
+          metadata: {
+            ...lastMessage.metadata,
+            thoughts: updatedThoughts,
+            thinking_content: thinkingContent
+          }
+        }
+
+        return {
+          messages: {
+            ...state.messages,
+            [sessionId]: [...sessionMessages.slice(0, -1), updatedLastMessage]
+          }
+        }
+      })
     }),
     {
       name: 'chat-storage',

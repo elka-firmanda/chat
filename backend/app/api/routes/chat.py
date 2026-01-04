@@ -3,6 +3,7 @@ Chat endpoints with message sending and SSE streaming.
 
 Optimized for low latency (< 100ms):
 - Uses asyncio.Queue for efficient event streaming
+- Working memory update streaming for real-time agent progress
 - Keep-alive comments every 30 seconds
 - Optimized event formatting
 - Minimal buffering
@@ -23,15 +24,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db.repositories.chat import ChatRepository
 from app.config.config_manager import get_config, config_manager
-from app.agents.graph import run_agent_workflow
+from app.agents.graph import run_agent_workflow_with_streaming
 from app.agents.memory import AsyncWorkingMemory
+from app.utils.streaming import (
+    event_manager,
+    event_generator,
+    SSEEventManager,
+    format_sse_event,
+)
 
 
 router = APIRouter()
-
-
-# Event queue storage (in-memory, per-session)
-event_queues: Dict[str, asyncio.Queue] = {}
 
 
 class ChatMessageRequest(BaseModel):
@@ -50,48 +53,6 @@ class ChatMessageResponse(BaseModel):
     created_at: str
 
 
-class StreamEvent(BaseModel):
-    """SSE event model."""
-
-    event: str  # thought, step_update, message_chunk, error, complete
-    data: Dict[str, Any]
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
-
-
-def get_event_queue(session_id: str) -> asyncio.Queue:
-    """Get or create event queue for a session."""
-    if session_id not in event_queues:
-        event_queues[session_id] = asyncio.Queue()
-    return event_queues[session_id]
-
-
-def format_sse_event(event_type: str, data: Dict[str, Any]) -> str:
-    return f"event: {event_type}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
-
-
-async def event_generator(session_id: str) -> AsyncGenerator[str, None]:
-    queue = get_event_queue(session_id)
-
-    try:
-        while True:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=30.0)
-
-                if event is None:
-                    break
-
-                yield format_sse_event(event["event"], event["data"])
-
-            except asyncio.TimeoutError:
-                yield ": keepalive\n\n"
-
-    except asyncio.CancelledError:
-        pass
-    finally:
-        if session_id in event_queues:
-            del event_queues[session_id]
-
-
 async def run_agent_with_events(
     session_id: str,
     user_message: str,
@@ -100,7 +61,7 @@ async def run_agent_with_events(
     user_timezone: str = "UTC",
 ) -> Dict[str, Any]:
     """
-    Run agent workflow and stream events.
+    Run agent workflow and stream events including working memory updates.
 
     Args:
         session_id: Session identifier
@@ -112,38 +73,25 @@ async def run_agent_with_events(
     Returns:
         Final state from agent execution
     """
-    queue = get_event_queue(session_id)
-
-    # Send thought event
-    await queue.put(
-        {
-            "event": "thought",
-            "data": {
-                "agent": "master",
-                "content": f"Processing: {user_message[:100]}...",
-            },
-        }
-    )
-
     try:
-        # Run the agent workflow with timezone context
-        final_state = await run_agent_workflow(
+        await event_manager.emit_thought(
+            session_id=session_id,
+            agent="master",
+            content=f"Processing: {user_message[:100]}...",
+        )
+
+        final_state = await run_agent_workflow_with_streaming(
             user_message=user_message,
             session_id=session_id,
             deep_search=deep_search,
             user_timezone=user_timezone,
+            event_manager=event_manager,
         )
 
-        # Send complete event
-        await queue.put(
-            {
-                "event": "complete",
-                "data": {
-                    "message_id": message_id,
-                    "session_id": session_id,
-                    "final_answer": final_state.get("final_answer", ""),
-                },
-            }
+        await event_manager.emit_complete(
+            session_id=session_id,
+            message_id=message_id,
+            final_answer=final_state.get("final_answer", ""),
         )
 
         return final_state
@@ -155,14 +103,20 @@ async def run_agent_with_events(
             "session_id": session_id,
         }
 
-        await queue.put(
-            {
-                "event": "error",
-                "data": error_data,
-            }
+        await event_manager.emit_error(
+            session_id=session_id,
+            error=str(e),
+            error_type="execution_error",
+            can_retry=True,
         )
 
         return {"error": str(e), "session_id": session_id}
+
+    return {
+        "status": "cancelled",
+        "session_id": session_id,
+        "message": "Agent execution has been cancelled",
+    }
 
 
 @router.post("/message")
@@ -180,13 +134,11 @@ async def send_message(
     repo = ChatRepository(db)
     config = config_manager.load()
 
-    # Get or create session
     if session_id:
         chat_session = await repo.get_session(session_id)
         if not chat_session:
             raise HTTPException(status_code=404, detail="Session not found")
     else:
-        # Create new session
         title = (
             request.content[:50] + "..."
             if len(request.content) > 50
@@ -195,7 +147,6 @@ async def send_message(
         chat_session = await repo.create_session(title=title)
         session_id = chat_session.id
 
-    # Create user message
     message = await repo.create_message(
         session_id=session_id,
         role="user",
@@ -203,7 +154,6 @@ async def send_message(
         extra_data={"deep_search": request.deep_search},
     )
 
-    # Create assistant message placeholder
     assistant_message = await repo.create_message(
         session_id=session_id,
         role="assistant",
@@ -212,7 +162,6 @@ async def send_message(
         extra_data={"deep_search": request.deep_search},
     )
 
-    # Initialize working memory for session
     await repo.save_working_memory(
         session_id=session_id,
         memory_tree={},
@@ -220,7 +169,6 @@ async def send_message(
         index_map={},
     )
 
-    # Start agent execution in background with timezone context
     asyncio.create_task(
         run_agent_with_events(
             session_id=session_id,
@@ -250,15 +198,15 @@ async def stream_response(
 
     Events:
     - thought: Agent thinking process
-    - step_update: Progress step status change
+    - memory_update: Working memory update
+    - node_added: New memory node added
+    - node_updated: Memory node updated
+    - timeline_update: New timeline entry
+    - step_progress: Step progress update
     - message_chunk: Streaming final response
     - error: Error occurred
     - complete: Execution finished
     """
-    # Verify session exists
-    # Note: We'd need db dependency but StreamingResponse doesn't support it cleanly
-    # For now, we assume session is valid if stream is requested
-
     return StreamingResponse(
         event_generator(session_id),
         media_type="text/event-stream",
@@ -279,12 +227,7 @@ async def cancel_execution(session_id: str):
 
     Sends termination signal to the event queue.
     """
-    queue = event_queues.get(session_id)
-
-    if queue:
-        # Signal termination
-        await queue.put(None)
-        del event_queues[session_id]
+    await event_manager.close(session_id)
 
     return {
         "status": "cancelled",

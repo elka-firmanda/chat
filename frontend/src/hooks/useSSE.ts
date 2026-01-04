@@ -6,11 +6,74 @@ interface SSEEvent {
   data: Record<string, unknown>
 }
 
+interface MemoryUpdateEvent {
+  update_type: 'full' | 'incremental' | 'node_add' | 'node_update'
+  memory_tree: Record<string, unknown>
+  timeline: Array<{
+    node_id: string
+    agent: string
+    node_type: string
+    description: string
+    status: string
+    timestamp: string
+    parent_id?: string
+  }>
+  index: Record<string, unknown>
+  stats: {
+    total_nodes: number
+    timeline_length: number
+  }
+}
+
+interface NodeAddedEvent {
+  node_id: string
+  agent: string
+  node_type: string
+  description: string
+  parent_id?: string
+  content?: Record<string, unknown>
+  timestamp: string
+}
+
+interface NodeUpdatedEvent {
+  node_id: string
+  status?: string
+  content?: Record<string, unknown>
+  completed: boolean
+  timestamp: string
+}
+
+interface TimelineUpdateEvent {
+  node_id: string
+  agent: string
+  node_type: string
+  description: string
+  status: string
+  parent_id?: string
+  timestamp: string
+}
+
+interface StepProgressEvent {
+  step_id: string
+  step_number: number
+  total_steps: number
+  agent: string
+  status: string
+  description: string
+  logs?: string
+  progress_percentage: number
+}
+
 interface UseSSEOptions {
   onThought?: (data: { agent: string; content: string }) => void
   onStepUpdate?: (data: { step_id: string; status: string; description: string; logs?: string }) => void
+  onStepProgress?: (data: StepProgressEvent) => void
+  onMemoryUpdate?: (data: MemoryUpdateEvent) => void
+  onNodeAdded?: (data: NodeAddedEvent) => void
+  onNodeUpdated?: (data: NodeUpdatedEvent) => void
+  onTimelineUpdate?: (data: TimelineUpdateEvent) => void
   onMessageChunk?: (data: { content: string }) => void
-  onError?: (data: { 
+  onError?: (data: {
     error: {
       error_type: string
       message: string
@@ -69,6 +132,31 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
       const data = JSON.parse(e.data) as { step_id: string; status: string; description: string; logs?: string }
       options.onStepUpdate?.(data)
     })
+
+    eventSource.addEventListener('step_progress', (e) => {
+      const data = JSON.parse(e.data) as StepProgressEvent
+      options.onStepProgress?.(data)
+    })
+
+    eventSource.addEventListener('memory_update', (e) => {
+      const data = JSON.parse(e.data) as MemoryUpdateEvent
+      options.onMemoryUpdate?.(data)
+    })
+
+    eventSource.addEventListener('node_added', (e) => {
+      const data = JSON.parse(e.data) as NodeAddedEvent
+      options.onNodeAdded?.(data)
+    })
+
+    eventSource.addEventListener('node_updated', (e) => {
+      const data = JSON.parse(e.data) as NodeUpdatedEvent
+      options.onNodeUpdated?.(data)
+    })
+
+    eventSource.addEventListener('timeline_update', (e) => {
+      const data = JSON.parse(e.data) as TimelineUpdateEvent
+      options.onTimelineUpdate?.(data)
+    })
     
     eventSource.addEventListener('message_chunk', (e) => {
       const data = JSON.parse(e.data) as { content: string }
@@ -100,7 +188,6 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         setError(data.error.message)
         options.onError?.(data)
       } catch (parseError) {
-        // Fallback for old format
         const legacyData = JSON.parse(e.data) as { message: string; retry_count: number }
         setError(legacyData.message)
         options.onError?.({

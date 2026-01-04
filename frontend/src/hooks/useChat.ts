@@ -6,6 +6,7 @@ export function useChat() {
   const {
     activeSessionId,
     addMessage,
+    addThought,
     setMessages,
     prependMessages,
     setMessageTotal,
@@ -40,6 +41,15 @@ export function useChat() {
       if (onStream) {
         const eventSource = chatApi.stream(session_id)
 
+        eventSource.addEventListener('thought', (e) => {
+          try {
+            const data = JSON.parse(e.data)
+            addThought(session_id, data.agent, data.content)
+          } catch (err) {
+            console.error('Failed to parse thought event:', err)
+          }
+        })
+
         eventSource.addEventListener('message_chunk', (e) => {
           const data = JSON.parse(e.data)
           if (data.content) {
@@ -66,7 +76,7 @@ export function useChat() {
       setLoading(false)
       throw error
     }
-  }, [activeSessionId, addMessage, isLoading, setLoading])
+  }, [activeSessionId, addMessage, addThought, isLoading, setLoading])
 
   const loadMessages = useCallback(async (sessionId: string, limit = 30, offset = 0) => {
     try {

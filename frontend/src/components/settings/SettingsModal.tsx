@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
-import * as Switch from '@radix-ui/react-switch'
-import { X, Check, AlertCircle, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon, Plus, Trash2, Edit, Play, Wrench } from 'lucide-react'
-import { toolsApi, type CustomTool } from '../../services/api'
+import { X, Check, AlertCircle, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon, Plus, Trash2, Edit, Wrench, Key as KeyIcon } from 'lucide-react'
+import { toolsApi, configApi, type CustomTool } from '../../services/api'
+import { useSettingsStore } from '../../stores/settingsStore'
 
 // Provider options
 const PROVIDERS = [
@@ -58,6 +58,20 @@ interface SettingsModalProps {
   onOpenChange: (open: boolean) => void
 }
 
+interface AgentConfig {
+  provider: string
+  model: string
+  max_tokens: number
+  temperature?: number
+  system_prompt: string
+  tavily_api_key?: string
+  max_urls_to_scrape?: number
+  scraping_timeout?: number
+  enabled_tools?: string[]
+  sandbox_enabled?: boolean
+  data_warehouse_schema?: string
+}
+
 interface ConfigData {
   general: {
     timezone: string
@@ -71,43 +85,11 @@ interface ConfigData {
     pool_size: number
   }
   agents: {
-    master: {
-      provider: string
-      model: string
-      max_tokens: number
-      temperature: number
-      system_prompt: string
-    }
-    planner: {
-      provider: string
-      model: string
-      max_tokens: number
-      system_prompt: string
-    }
-    researcher: {
-      provider: string
-      model: string
-      max_tokens: number
-      tavily_api_key: string
-      max_urls_to_scrape: number
-      scraping_timeout: number
-      system_prompt: string
-    }
-    tools: {
-      provider: string
-      model: string
-      max_tokens: number
-      enabled_tools: string[]
-      sandbox_enabled: boolean
-      system_prompt: string
-    }
-    database: {
-      provider: string
-      model: string
-      max_tokens: number
-      data_warehouse_schema: string
-      system_prompt: string
-    }
+    master: AgentConfig
+    planner: AgentConfig
+    researcher: AgentConfig
+    tools: AgentConfig
+    database: AgentConfig
   }
   api_keys: {
     anthropic: string
@@ -332,8 +314,8 @@ function AgentSettingsTab({
 }: {
   title: string
   icon: React.ElementType
-  config: ConfigData['agents']['master']
-  onChange: (config: ConfigData['agents']['master']) => void
+  config: AgentConfig
+  onChange: (config: AgentConfig) => void
   showTemperature?: boolean
   showTools?: boolean
   showSchema?: boolean
@@ -453,43 +435,77 @@ function AgentSettingsTab({
 export default function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState('general')
   const [config, setConfig] = useState<ConfigData>(defaultConfig)
+  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [profile, setProfile] = useState('custom')
 
-  // Load config on mount
-  useEffect(() => {
-    // In production, fetch config from API
-    setConfig(defaultConfig)
+  const loadConfig = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await configApi.get()
+      const data = response.data
+      setConfig({
+        general: data.general || defaultConfig.general,
+        database: data.database || defaultConfig.database,
+        agents: data.agents || defaultConfig.agents,
+        api_keys: data.api_keys || defaultConfig.api_keys,
+        profiles: data.profiles || defaultConfig.profiles,
+      })
+    } catch (err) {
+      setError('Failed to load configuration')
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    if (open) {
+      loadConfig()
+    }
+  }, [open, loadConfig])
 
   const handleSave = async () => {
     setSaving(true)
-    // In production, save to API
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    setSaving(false)
-    onOpenChange(false)
+    setError(null)
+    try {
+      await configApi.update({
+        general: config.general,
+        database: config.database,
+        agents: config.agents,
+        api_keys: config.api_keys,
+        profiles: config.profiles,
+      })
+      await loadConfig()
+      onOpenChange(false)
+    } catch (err) {
+      setError('Failed to save configuration')
+      console.error(err)
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const handleProfileChange = (newProfile: string) => {
+  const handleProfileChange = async (newProfile: string) => {
     setProfile(newProfile)
-    if (newProfile === 'fast') {
+    if (newProfile === 'custom') {
+      return
+    }
+    try {
+      setLoading(true)
+      const response = await configApi.applyProfile(newProfile)
+      const data = response.data
       setConfig({
         ...config,
-        agents: {
-          ...config.agents,
-          master: { ...config.agents.master, model: 'gpt-3.5-turbo' },
-          planner: { ...config.agents.planner, model: 'gpt-3.5-turbo' },
-        },
+        agents: data.config.agents || config.agents,
       })
-    } else if (newProfile === 'deep') {
-      setConfig({
-        ...config,
-        agents: {
-          ...config.agents,
-          master: { ...config.agents.master, model: 'claude-3-opus-20240229' },
-          researcher: { ...config.agents.researcher, max_urls_to_scrape: 10 },
-        },
-      })
+    } catch (err) {
+      setError(`Failed to apply profile: ${newProfile}`)
+      console.error(err)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -516,6 +532,20 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
               </button>
             </Dialog.Close>
           </div>
+
+          {error && (
+            <div className="mx-4 mt-3 p-3 bg-red-50 text-red-600 rounded-lg text-sm flex items-center gap-2">
+              <AlertCircle size={16} />
+              {error}
+            </div>
+          )}
+
+          {loading && !saving && (
+            <div className="mx-4 mt-3 p-3 bg-muted/50 rounded-lg text-sm flex items-center gap-2">
+              <Loader2 size={16} className="animate-spin" />
+              Loading configuration...
+            </div>
+          )}
 
           <div className="px-4 py-3 border-b bg-muted/30">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -776,7 +806,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                   <ApiKeyInput
                     label="Tavily API Key"
                     provider="tavily"
-                    value={config.agents.researcher.tavily_api_key}
+                    value={config.agents.researcher.tavily_api_key || ''}
                     onChange={(v) => setConfig({ ...config, agents: { ...config.agents, researcher: { ...config.agents.researcher, tavily_api_key: v } } })}
                     placeholder="tvly-..."
                   />
@@ -1173,13 +1203,5 @@ function CustomToolsTab() {
         </div>
       )}
     </div>
-  )
-}
-
-function KeyIcon({ size }: { size: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-    </svg>
   )
 }

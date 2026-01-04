@@ -129,13 +129,16 @@ class ChartGenerator:
         if colors and isinstance(colors, str):
             colors = json.loads(colors)
 
-        if colors and len(colors) == len(values):
-            ax.bar(labels, values, color=colors)
-        else:
-            ax.bar(labels, values)
-
         if kwargs.get("horizontal", False):
-            ax.barh(labels, values)
+            if colors and len(colors) == len(values):
+                ax.barh(labels, values, color=colors)
+            else:
+                ax.barh(labels, values)
+        else:
+            if colors and len(colors) == len(values):
+                ax.bar(labels, values, color=colors)
+            else:
+                ax.bar(labels, values)
 
     def _create_line_chart(self, ax, data: Dict[str, Any], **kwargs) -> None:
         """Create a line chart."""
