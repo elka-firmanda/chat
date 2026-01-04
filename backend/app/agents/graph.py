@@ -256,6 +256,7 @@ def create_initial_state(
         intervention_action=None,
         current_error=None,
         final_answer="",
+        skip_planner=not deep_search_enabled,
     )
 
 
@@ -263,6 +264,7 @@ async def master_agent(state: AgentState) -> AgentState:
     """Master agent node - orchestrates subagents based on plan."""
     session_id = state["session_id"]
     deep_search = state["deep_search_enabled"]
+    skip_planner = state.get("skip_planner", False)
     current_plan = state.get("current_plan", [])
     active_step = state.get("active_step", 0)
     previous_step_output = state.get("previous_step_output", {})
@@ -273,6 +275,43 @@ async def master_agent(state: AgentState) -> AgentState:
     else:
         memory = AsyncWorkingMemory(session_id)
         await memory.load(state["working_memory"])
+
+    if skip_planner and state.get("final_answer"):
+        return state
+
+    if skip_planner and not state.get("final_answer"):
+        node_id = await memory.add_node(
+            agent=AgentType.MASTER.value,
+            node_type="thought",
+            description="Casual mode - generating quick response",
+        )
+
+        await memory.update_node(
+            node_id, completed=True, status=StepStatus.COMPLETED.value
+        )
+
+        subagent_results = {
+            "researcher_output": state.get("researcher_output", {}),
+            "tools_output": state.get("tools_output", {}),
+            "database_output": state.get("database_output", {}),
+        }
+        synthesized_response = await synthesize_response(
+            user_message=state["user_message"],
+            subagent_results=subagent_results,
+            working_memory=state.get("working_memory", {}),
+        )
+
+        await memory.add_node(
+            agent=AgentType.MASTER.value,
+            node_type="result",
+            description="Quick response generated (casual mode)",
+            content=synthesized_response,
+        )
+
+        state["working_memory"] = await memory.to_dict()
+        state["final_answer"] = synthesized_response
+        state["master_output"] = synthesized_response
+        return state
 
     if previous_step_output.get("requires_replan", False):
         trigger_node_id = await memory.add_node(
@@ -770,13 +809,6 @@ class StepAnalyzer:
             next_step = plan[i]
             next_type = next_step.get("type", "")
 
-        for i in range(start_step + 1, len(plan)):
-            if len(batch) >= max_batch_size:
-                break
-
-            next_step = plan[i]
-            next_type = next_step.get("type", "")
-
             if next_type in StepAnalyzer.SEQUENTIAL_ONLY:
                 break
 
@@ -943,6 +975,10 @@ def route_step(state: AgentState) -> str:
     active_step = state.get("active_step", 0)
     requires_replan = state.get("requires_replan", False)
     deep_search = state.get("deep_search_enabled", False)
+    skip_planner = state.get("skip_planner", False)
+
+    if skip_planner:
+        return "master"
 
     if requires_replan:
         return "planner"
@@ -1018,6 +1054,9 @@ def create_agent_graph() -> StateGraph:
     compiled_app = workflow.compile(checkpointer=checkpointer)
 
     return compiled_app
+
+
+app = create_agent_graph()
 
 
 async def run_agent_workflow(
@@ -1103,14 +1142,16 @@ async def run_agent_workflow_with_streaming(
         await event_manager.emit_memory_update(
             session_id=session_id,
             memory_tree={},
-            timeline=[{
-                "node_id": "root",
-                "agent": "master",
-                "node_type": "root",
-                "description": "Session started",
-                "status": "running",
-                "timestamp": datetime.utcnow().isoformat(),
-            }],
+            timeline=[
+                {
+                    "node_id": "root",
+                    "agent": "master",
+                    "node_type": "root",
+                    "description": "Session started",
+                    "status": "running",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            ],
             index={},
             update_type="full",
         )
@@ -1245,7 +1286,11 @@ async def _process_graph_event(
     elif event_type == "on_tool_start":
         tool_name = chunk.get("name", "")
         input_data = chunk.get("input", {})
-        query = input_data.get("query", "") if isinstance(input_data, dict) else str(input_data)
+        query = (
+            input_data.get("query", "")
+            if isinstance(input_data, dict)
+            else str(input_data)
+        )
 
         await event_manager.emit_thought(
             session_id=session_id,
@@ -1262,33 +1307,3 @@ async def _process_graph_event(
             agent="tools",
             content=f"Completed: {tool_name}",
         )
-
-
-app = create_agent_graph()
-
-    initial_state = create_initial_state(
-        user_message=user_message,
-        session_id=session_id,
-        deep_search_enabled=deep_search,
-        user_timezone=user_timezone,
-    )
-
-    config = {"configurable": {"thread_id": session_id}}
-
-    final_state = None
-    async for chunk in app.astream_events(initial_state, config, version="v1"):
-        pass
-
-    final_state = await app.aget_state(config)
-
-    if final_state:
-        state_dict: Dict[str, Any] = dict(final_state.values)
-        state_dict["timezone_context"] = timezone_context
-        return state_dict
-
-    result: Dict[str, Any] = dict(initial_state)
-    result["timezone_context"] = timezone_context
-    return result
-
-
-app = create_agent_graph()

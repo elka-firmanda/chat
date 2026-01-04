@@ -2,14 +2,20 @@
 Main FastAPI application for the Agentic Chatbot.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config.config_manager import config_manager
-from app.db.session import init_db, initialize_engine, get_database_info
+from app.db.session import init_db, initialize_engine, get_database_info, _engine
 from app.api.routes import health, sessions, config, chat, tools
+from app.utils.shutdown import (
+    get_shutdown_manager,
+    create_shutdown_handler,
+    save_working_memory_state,
+)
 
 
 @asynccontextmanager
@@ -19,15 +25,14 @@ async def lifespan(app: FastAPI):
     """
     print("Starting Agentic Chatbot...")
 
-    # Initialize database engine
+    await create_shutdown_handler(app)
+
     initialize_engine()
     print(f"Database engine initialized: {get_database_info()}")
 
-    # Initialize database tables
     await init_db()
     print("Database tables initialized")
 
-    # Load configuration
     try:
         config = config_manager.load()
         print(f"Configuration loaded: {config.version}")
@@ -36,8 +41,31 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
     print("Shutting down Agentic Chatbot...")
+
+    shutdown_manager = get_shutdown_manager()
+
+    active_queues = 0
+    try:
+        from app.utils.streaming import event_manager
+
+        active_queues = event_manager.get_queue_count()
+        if active_queues > 0:
+            print(f"Closing {active_queues} active SSE event queues...")
+            for session_id in list(event_manager._queues.keys()):
+                await save_working_memory_state(session_id)
+    except Exception as e:
+        print(f"Warning: Could not close event queues: {e}")
+
+    if _engine is not None:
+        print("Disposing database engine...")
+        try:
+            await _engine.dispose()
+            print("Database engine disposed")
+        except Exception as e:
+            print(f"Warning: Error disposing database engine: {e}")
+
+    print("Shutdown complete")
 
 
 # Create FastAPI application
