@@ -17,6 +17,9 @@ export default function MessageComponent({ message }: MessageProps) {
     setTimeout(() => setCopied(false), 2000)
   }
   
+  // Get thinking content from metadata
+  const thinkingContent = message.metadata?.thinking_content || "Processing..."
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} px-2 md:px-0`}>
       <div className={`max-w-[85%] md:max-w-[80%] rounded-2xl px-4 py-3 md:px-5 ${
@@ -28,7 +31,7 @@ export default function MessageComponent({ message }: MessageProps) {
         {!isUser && message.agent_type && (
           <ThinkingBlock 
             agent={message.agent_type as any} 
-            content="Agent processing..."
+            content={thinkingContent}
             defaultCollapsed={true}
           />
         )}

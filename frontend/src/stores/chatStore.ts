@@ -7,7 +7,9 @@ export interface Message {
   content: string
   agent_type?: string
   created_at: string
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown> & {
+    thinking_content?: string
+  }
 }
 
 export interface ChatSession {

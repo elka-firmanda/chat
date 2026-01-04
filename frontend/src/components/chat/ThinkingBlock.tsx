@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import * as Collapsible from '@radix-ui/react-collapsible'
 
 interface ThinkingBlockProps {
   agent: 'master' | 'planner' | 'researcher' | 'tools' | 'database'
@@ -8,11 +9,11 @@ interface ThinkingBlockProps {
 }
 
 const agentColors = {
-  master: 'border-l-agent-master',
-  planner: 'border-l-agent-planner',
-  researcher: 'border-l-agent-researcher',
-  tools: 'border-l-agent-tools',
-  database: 'border-l-agent-database'
+  master: 'border-l-[#8b5cf6]',     // Purple
+  planner: 'border-l-[#3b82f6]',    // Blue
+  researcher: 'border-l-[#22c55e]', // Green
+  tools: 'border-l-[#f97316]',      // Orange
+  database: 'border-l-[#ec4899]'    // Pink
 }
 
 const agentLabels = {
@@ -31,24 +32,25 @@ export default function ThinkingBlock({
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   
   return (
-    <div className={`border-l-4 ${agentColors[agent]} pl-4 my-2 rounded-r`}>
-      <button
-        onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-      >
+    <Collapsible.Root 
+      open={!collapsed} 
+      onOpenChange={setCollapsed}
+      className={`border-l-4 ${agentColors[agent]} pl-4 my-2 rounded-r bg-muted/50`}
+    >
+      <Collapsible.Trigger className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors w-full">
         {collapsed ? (
-          <ChevronRight size={16} />
+          <ChevronRight size={16} className="transition-transform" />
         ) : (
-          <ChevronDown size={16} />
+          <ChevronDown size={16} className="transition-transform" />
         )}
         <span>{agentLabels[agent]} thinking</span>
-      </button>
+      </Collapsible.Trigger>
       
-      {!collapsed && (
+      <Collapsible.Content>
         <div className="mt-2 text-sm text-muted-foreground animate-in fade-in">
           {content}
         </div>
-      )}
-    </div>
+      </Collapsible.Content>
+    </Collapsible.Root>
   )
 }
