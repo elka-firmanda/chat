@@ -14,6 +14,7 @@ import time
 from typing import Dict, Any, Optional
 
 from RestrictedPython import compile_restricted
+from RestrictedPython.Eval import default_guarded_getiter
 from RestrictedPython.Guards import safe_builtins
 from RestrictedPython.PrintCollector import PrintCollector
 
@@ -49,14 +50,16 @@ class CodeExecutor:
         code_bytecode,
         restricted_globals,
         locals_dict,
-        result_holder,
+        result_holder: Dict[str, Any],
     ):
         """Synchronous execution to run in a thread."""
         try:
             exec(code_bytecode, restricted_globals, locals_dict)
-            result_holder[0] = locals_dict.get("_")
+            result_holder["result"] = locals_dict.get("_")
+            result_holder["error"] = None
         except Exception as e:
-            result_holder[0] = e
+            result_holder["result"] = None
+            result_holder["error"] = e
 
     async def execute(
         self,
@@ -88,6 +91,7 @@ class CodeExecutor:
             restricted_globals = {
                 "__builtins__": safe_builtins,
                 "_print_": PrintCollector,
+                "_getiter_": default_guarded_getiter,
                 "_getattr_": getattr,
                 "_setattr_": setattr,
                 "_delattr_": delattr,
@@ -103,7 +107,7 @@ class CodeExecutor:
 
             code_bytecode = compile_restricted(code, "<string>", "exec")
 
-            result_holder = [None]
+            result_holder: Dict[str, Any] = {"result": None, "error": None}
             execution_thread = threading.Thread(
                 target=self._execute_code_sync,
                 args=(code_bytecode, restricted_globals, locals_dict, result_holder),
@@ -134,9 +138,8 @@ class CodeExecutor:
                     "execution_time": execution_time,
                 }
 
-            result = result_holder[0]
-            if isinstance(result, Exception):
-                error = result
+            error = result_holder.get("error")
+            if error:
                 if isinstance(error, SyntaxError):
                     exception_info = {
                         "type": "SyntaxError",
@@ -160,7 +163,7 @@ class CodeExecutor:
 
             return {
                 "success": True,
-                "result": result,
+                "result": result_holder.get("result"),
                 "output": output,
                 "error": "",
                 "execution_time": execution_time,
@@ -229,14 +232,14 @@ class CodeExecutor:
         try:
             code_bytecode = compile_restricted(expression, "<string>", "eval")
 
-            result_holder = [None]
+            result_holder: Dict[str, Any] = {"result": None, "error": None}
 
             def eval_in_thread():
                 try:
                     result = eval(code_bytecode, restricted_globals)
-                    result_holder[0] = result
+                    result_holder["result"] = result
                 except Exception as e:
-                    result_holder[0] = e
+                    result_holder["error"] = e
 
             execution_thread = threading.Thread(target=eval_in_thread, daemon=True)
             execution_thread.start()
@@ -261,24 +264,24 @@ class CodeExecutor:
                     "execution_time": execution_time,
                 }
 
-            result = result_holder[0]
-            if isinstance(result, Exception):
+            error = result_holder.get("error")
+            if error:
                 exception_info = {
-                    "type": type(result).__name__,
-                    "message": str(result),
+                    "type": type(error).__name__,
+                    "message": str(error),
                 }
                 return {
                     "success": False,
                     "result": None,
                     "output": output,
-                    "error": str(result),
+                    "error": str(error),
                     "exception": exception_info,
                     "execution_time": execution_time,
                 }
 
             return {
                 "success": True,
-                "result": result,
+                "result": result_holder.get("result"),
                 "output": output,
                 "error": "",
                 "execution_time": execution_time,
