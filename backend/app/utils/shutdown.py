@@ -6,6 +6,7 @@ Manages orderly shutdown of the application including:
 - Active task cancellation with timeout
 - Resource cleanup (database connections, HTTP clients, event queues)
 - Working memory persistence for in-progress sessions
+- Session-specific task cancellation for user navigation
 """
 
 import asyncio
@@ -15,6 +16,7 @@ import sys
 from typing import Dict, Optional, Any, Set
 from datetime import datetime
 from contextlib import suppress
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -308,11 +310,24 @@ async def cancel_session_execution(session_id: str) -> bool:
         True if cancellation was initiated
     """
     try:
-        from app.utils.streaming import event_manager
+        from app.utils.session_task_manager import get_session_task_manager
 
-        await event_manager.close(session_id)
+        task_manager = get_session_task_manager()
+        event_manager_cancelled = False
 
-        logger.info(f"Cancelled execution for session {session_id}")
+        try:
+            from app.utils.streaming import event_manager as em
+
+            await em.close(session_id)
+            event_manager_cancelled = True
+        except Exception as e:
+            logger.debug(f"Event manager cleanup for {session_id}: {e}")
+
+        task_cancelled = await task_manager.cancel_session(session_id)
+
+        logger.info(
+            f"Cancelled execution for session {session_id} (tasks: {task_cancelled}, events: {event_manager_cancelled})"
+        )
         return True
 
     except Exception as e:

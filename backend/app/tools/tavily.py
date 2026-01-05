@@ -34,6 +34,7 @@ class TavilyClient:
         query: str,
         max_results: int = 5,
         include_raw_content: bool = False,
+        timeout: float = 30.0,
     ) -> Dict[str, Any]:
         """
         Search Tavily for relevant results.
@@ -42,6 +43,7 @@ class TavilyClient:
             query: Search query
             max_results: Maximum number of results (default: 5)
             include_raw_content: Whether to include raw content (default: False)
+            timeout: Request timeout in seconds (default: 30)
 
         Returns:
             Search results dictionary with query, results, and follow_up_questions
@@ -51,7 +53,7 @@ class TavilyClient:
             return self._mock_search(query, max_results)
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/search",
                     headers={"Authorization": f"Bearer {self.api_key}"},
@@ -63,6 +65,9 @@ class TavilyClient:
                 )
                 response.raise_for_status()
                 return response.json()
+        except asyncio.TimeoutError:
+            logger.error(f"Tavily search timed out after {timeout}s")
+            return self._mock_search(query, max_results)
         except Exception as e:
             logger.error(f"Tavily search failed: {e}")
             return self._mock_search(query, max_results)
@@ -72,6 +77,7 @@ class TavilyClient:
         query: str,
         max_results: int = 5,
         max_tokens: int = 4000,
+        timeout: float = 30.0,
     ) -> Dict[str, Any]:
         """
         Get search results with extracted context.
@@ -80,6 +86,7 @@ class TavilyClient:
             query: Search query
             max_results: Maximum number of results (default: 5)
             max_tokens: Maximum tokens for context (default: 4000)
+            timeout: Request timeout in seconds (default: 30)
 
         Returns:
             Search context results
@@ -88,7 +95,7 @@ class TavilyClient:
             return self._mock_search(query, max_results)
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/search",
                     headers={"Authorization": f"Bearer {self.api_key}"},
@@ -100,6 +107,9 @@ class TavilyClient:
                 )
                 response.raise_for_status()
                 return response.json()
+        except asyncio.TimeoutError:
+            logger.error(f"Tavily search context timed out after {timeout}s")
+            return self._mock_search(query, max_results)
         except Exception as e:
             logger.error(f"Tavily search context failed: {e}")
             return self._mock_search(query, max_results)

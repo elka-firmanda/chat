@@ -137,6 +137,7 @@ class Config(BaseModel):
     agents: AgentsSettings = Field(default_factory=AgentsSettings)
     api_keys: APIKeys = Field(default_factory=APIKeys)
     profiles: Profiles = Field(default_factory=Profiles)
+    current_profile: Optional[str] = None
 
 
 # Configuration update request

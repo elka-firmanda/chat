@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useSessions } from '../../hooks/useSessions'
 import { useChatStore } from '../../stores/chatStore'
-import { useSettingsStore } from '../../stores/settingsStore'
 import { sessionsApi } from '../../services/api'
 import { MessageSquare, Archive, Search, ChevronDown, ChevronRight, Download, MoreHorizontal, X, Clock, Unarchive, Trash2 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
+import { SkeletonSessionItem } from '../ui/Skeleton'
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value)
@@ -25,10 +25,8 @@ function useDebounce<T>(value: T, delay: number): T {
 
 export default function SessionList() {
   const { sessions, activeSessionId, isLoading, searchResults, searchSessions, clearSearch, archiveSession, unarchiveSession, deleteSession } = useSessions()
-  const { setActiveSession, isDeepSearchEnabled, toggleDeepSearch } = useChatStore()
-  const { general } = useSettingsStore()
+  const { setActiveSession } = useChatStore()
   const { loadSession } = useSessions()
-  const { sendMessage } = useChat()
   
   const [showArchived, setShowArchived] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
@@ -59,10 +57,6 @@ export default function SessionList() {
     setActiveSession(null)
     setSearchQuery('')
     setShowSearch(false)
-  }
-  
-  const handleSelectExample = async (question: string) => {
-    await sendMessage(question, isDeepSearchEnabled)
   }
   
   const handleExportSession = async (sessionId: string, e: Event) => {
@@ -269,9 +263,11 @@ export default function SessionList() {
               </div>
             ) : (
               <>
-                {isLoading ? (
-                  <div className="p-4 text-center text-muted-foreground text-sm">
-                    Loading sessions...
+                {isLoading && sessions.length === 0 ? (
+                  <div className="space-y-1">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <SkeletonSessionItem key={i} />
+                    ))}
                   </div>
                 ) : activeSessions.length > 0 ? (
                   <div className="space-y-1">

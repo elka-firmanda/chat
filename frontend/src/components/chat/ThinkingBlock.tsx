@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
+import MarkdownRenderer from './MarkdownRenderer'
 
 interface ThinkingBlockProps {
   agent: 'master' | 'planner' | 'researcher' | 'tools' | 'database'
@@ -47,8 +48,8 @@ export default function ThinkingBlock({
       </Collapsible.Trigger>
       
       <Collapsible.Content>
-        <div className="mt-2 text-sm text-muted-foreground animate-in fade-in">
-          {content}
+        <div className="mt-2 text-sm animate-in fade-in">
+          <MarkdownRenderer content={content} />
         </div>
       </Collapsible.Content>
     </Collapsible.Root>

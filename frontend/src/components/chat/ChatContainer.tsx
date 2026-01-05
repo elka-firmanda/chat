@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MessageSquare, Bot } from 'lucide-react'
+import { MessageSquare } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useChatErrorStore, PendingError } from '../../stores/errorStore'
 import { chatApi } from '../../services/api'
@@ -7,20 +7,28 @@ import Message from './Message'
 import ExampleCards from './ExampleCards'
 import InputBox from './InputBox'
 import ProgressSteps from './ProgressSteps'
+import WorkingMemoryVisualization from './WorkingMemoryVisualization'
 import ErrorModal from './ErrorModal'
 import { useChat } from '../../hooks/useChat'
-import { useSessions } from '../../hooks/useSessions'
 import { useSSE } from '../../hooks/useSSE'
+import { useSessionCancellation } from '../../hooks/useSessionCancellation'
+import { SkeletonChatContainer } from '../ui/Skeleton'
 
 export default function ChatContainer() {
-  const { 
-    activeSessionId, 
-    messages, 
+  const {
+    activeSessionId,
+    messages,
     isDeepSearchEnabled,
     agentSteps,
+    workingMemory,
     addMessage,
+    updateMessage,
     updateAgentStep,
-    setAgentSteps
+    setWorkingMemory,
+    updateNode,
+    addTimelineEntry,
+    setActiveNode,
+    addThought
   } = useChatStore()
   
   const { 
@@ -33,15 +41,13 @@ export default function ChatContainer() {
   
   const sessionMessages = activeSessionId ? messages[activeSessionId] || [] : []
   const currentSteps = activeSessionId ? agentSteps[activeSessionId] || [] : []
-  const { sendMessage } = useChat()
+  const { sendMessage, isLoading: isChatLoading } = useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useSessionCancellation(activeSessionId)
 
   const handleSelectExample = async (question: string) => {
     await sendMessage(question, isDeepSearchEnabled)
-  }
-  
-  const handleNewChat = () => {
-    useChatStore.getState().setActiveSession(null)
   }
 
   // Auto-scroll to bottom when messages change
@@ -52,24 +58,72 @@ export default function ChatContainer() {
   // SSE integration for real-time updates
   useSSE(activeSessionId, {
     onThought: (data) => {
-      console.log('Thought:', data)
+      if (activeSessionId) {
+        addThought(activeSessionId, data.agent, data.content)
+      }
     },
     onStepUpdate: (data) => {
       if (activeSessionId) {
         updateAgentStep(activeSessionId, data.step_id, {
-          status: data.status,
+          status: data.status as 'pending' | 'running' | 'completed' | 'failed',
           logs: data.logs
+        })
+      }
+    },
+    onMemoryUpdate: (data) => {
+      if (activeSessionId) {
+        setWorkingMemory(activeSessionId, {
+          memory_tree: data.memory_tree as any,
+          timeline: data.timeline as any,
+          index: data.index as any,
+          stats: data.stats
+        })
+      }
+    },
+    onNodeAdded: (data) => {
+      if (activeSessionId) {
+        setActiveNode(activeSessionId, data.node_id)
+        addTimelineEntry(activeSessionId, {
+          node_id: data.node_id,
+          agent: data.agent,
+          node_type: data.node_type,
+          description: data.description,
+          status: 'running',
+          timestamp: data.timestamp,
+          parent_id: data.parent_id
+        })
+      }
+    },
+    onNodeUpdated: (data) => {
+      if (activeSessionId) {
+        updateNode(activeSessionId, data.node_id, {
+          status: data.status as 'pending' | 'running' | 'completed' | 'failed',
+          content: data.content
+        })
+      }
+    },
+    onTimelineUpdate: (data) => {
+      if (activeSessionId) {
+        addTimelineEntry(activeSessionId, {
+          node_id: data.node_id,
+          agent: data.agent,
+          node_type: data.node_type,
+          description: data.description,
+          status: data.status as 'pending' | 'running' | 'completed' | 'failed',
+          timestamp: data.timestamp,
+          parent_id: data.parent_id
         })
       }
     },
     onMessageChunk: (data) => {
       if (activeSessionId) {
-        const sessionMessages = useChatStore.getState().messages[activeSessionId] || []
+        const sessionMessages = messages[activeSessionId] || []
         const lastMessage = sessionMessages[sessionMessages.length - 1]
-        
+
         if (lastMessage && lastMessage.role === 'assistant') {
-          lastMessage.content += data.content
-          useChatStore.getState().addMessage(activeSessionId, lastMessage)
+          updateMessage(activeSessionId, lastMessage.id, {
+            content: lastMessage.content + data.content
+          })
         } else {
           addMessage(activeSessionId, {
             id: `temp-${Date.now()}`,
@@ -145,6 +199,13 @@ export default function ChatContainer() {
     clearErrorState()
   }
 
+  // Show skeleton loading state when no messages and loading
+  if (sessionMessages.length === 0 && isChatLoading) {
+    return (
+      <SkeletonChatContainer />
+    )
+  }
+
   // Show empty state when no messages
   if (sessionMessages.length === 0) {
     return (
@@ -187,7 +248,14 @@ export default function ChatContainer() {
         onSkip={handleSkip}
         onAbort={handleAbort}
       />
-      
+
+      {/* Working memory visualization */}
+      {activeSessionId && workingMemory[activeSessionId] && (
+        <WorkingMemoryVisualization
+          memory={workingMemory[activeSessionId]}
+        />
+      )}
+
       {/* Progress steps - shows when there are active steps */}
       <ProgressSteps steps={currentSteps} />
       
@@ -196,6 +264,19 @@ export default function ChatContainer() {
         {sessionMessages.map((message) => (
           <Message key={message.id} message={message} />
         ))}
+        {isChatLoading && sessionMessages.length > 0 && sessionMessages[sessionMessages.length - 1]?.role === 'user' && (
+          <div className="flex gap-3 p-3">
+            <div className="w-8 h-8 rounded-full bg-muted animate-pulse" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-24 bg-muted rounded animate-pulse" />
+              <div className="space-y-1">
+                <div className="h-3 w-full bg-muted rounded animate-pulse" />
+                <div className="h-3 w-5/6 bg-muted rounded animate-pulse" />
+                <div className="h-3 w-4/6 bg-muted rounded animate-pulse" />
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       

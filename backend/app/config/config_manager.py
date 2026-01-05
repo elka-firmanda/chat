@@ -205,6 +205,7 @@ class ConfigManager:
     def apply_profile(self, profile_name: str) -> Config:
         """
         Apply a configuration profile (e.g., 'fast', 'deep').
+        Updates current_profile to track the active profile.
         """
         config = self.load()
         profiles = config.profiles
@@ -236,6 +237,9 @@ class ConfigManager:
         if hasattr(profile, "database") and config.agents.database:
             for key, value in profile.database.items():
                 setattr(config.agents.database, key, value)
+
+        # Track current profile
+        config.current_profile = profile_name
 
         self.save(config)
         return config

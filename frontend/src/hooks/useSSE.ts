@@ -149,6 +149,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
   const reconnectAttemptsRef = useRef(0)
   const currentDelayRef = useRef(INITIAL_RETRY_DELAY)
   const lastEventIdRef = useRef<string | null>(null)
+  const previousSessionIdRef = useRef<string | null>(null)
 
   const cleanupEventSource = useCallback(() => {
     if (eventSourceRef.current) {
@@ -410,7 +411,13 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
       return
     }
 
+    if (previousSessionIdRef.current && previousSessionIdRef.current !== sessionId) {
+      chatApi.cancel(previousSessionIdRef.current).catch(console.error)
+    }
+    previousSessionIdRef.current = sessionId
+
     setError(null)
+    cleanupEventSource()
     const es = chatApi.stream(sessionId)
     eventSourceRef.current = es
 

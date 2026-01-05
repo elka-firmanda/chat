@@ -122,11 +122,13 @@ async def validate_api_key_endpoint(
 @router.get("/profiles")
 async def list_profiles():
     """
-    List available configuration profiles.
+    List available configuration profiles with their settings.
+    Returns current_profile to show which profile is actively applied.
     """
     try:
         config = get_config()
         profiles = config.profiles
+        current = config.current_profile
 
         return {
             "profiles": {
@@ -149,7 +151,7 @@ async def list_profiles():
                     },
                 },
             },
-            "current_profile": None,  # Could track current profile
+            "current_profile": current,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

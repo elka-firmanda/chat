@@ -705,36 +705,9 @@ async def tools_agent(state: AgentState) -> AgentState:
 
 async def database_agent(state: AgentState) -> AgentState:
     """Database agent - queries data warehouse."""
-    session_id = state["session_id"]
+    from .database import database_agent as db_agent
 
-    memory = AsyncWorkingMemory(session_id)
-    if state.get("working_memory"):
-        await memory.load(state["working_memory"])
-
-    node_id = await memory.add_node(
-        agent=AgentType.DATABASE.value,
-        node_type="thought",
-        description="Processing database query",
-    )
-
-    database_output = {
-        "query": "",
-        "results": [],
-        "row_count": 0,
-        "execution_time_ms": 0,
-    }
-
-    await memory.update_node(
-        node_id,
-        content=database_output,
-        completed=True,
-        status=StepStatus.COMPLETED.value,
-    )
-
-    state["database_output"] = database_output
-    state["working_memory"] = await memory.to_dict()
-
-    return state
+    return await db_agent(state)
 
 
 class StepAnalyzer:

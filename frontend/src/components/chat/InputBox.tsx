@@ -1,19 +1,25 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Search, Sparkles, Info } from 'lucide-react'
+import { Send, Search, Sparkles, Info, AlertCircle } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { useChatStore } from '../../stores/chatStore'
 import { useChat } from '../../hooks/useChat'
 
+const MAX_MESSAGE_LENGTH = 10000
+const WARNING_THRESHOLD = 8000
+
 export default function InputBox() {
   const [message, setMessage] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const characterCount = message.length
+  const isOverLimit = characterCount > MAX_MESSAGE_LENGTH
+  const isNearLimit = characterCount >= WARNING_THRESHOLD && !isOverLimit
   
   const { isDeepSearchEnabled, toggleDeepSearch, isLoading } = useChatStore()
   const { sendMessage } = useChat()
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!message.trim() || isLoading) return
+    if (!message.trim() || isLoading || isOverLimit) return
     
     const content = message.trim()
     setMessage('')
@@ -102,15 +108,28 @@ export default function InputBox() {
             className={`w-full resize-none min-h-[44px] max-h-[150px] md:max-h-[200px] p-3 pr-12 rounded-xl border focus:outline-none focus:ring-2 text-base md:text-sm transition-colors ${
               isDeepSearchEnabled 
                 ? 'border-violet-200 dark:border-violet-800 focus:ring-violet-500' 
-                : 'border-input focus:ring-primary'
+                : isOverLimit 
+                  ? 'border-red-300 dark:border-red-700 focus:ring-red-500'
+                  : 'border-input focus:ring-primary'
             }`}
             rows={1}
             disabled={isLoading}
             enterKeyHint="send"
+            maxLength={MAX_MESSAGE_LENGTH}
           />
+          {/* Character count indicator */}
+          <div className={`absolute right-3 bottom-1 translate-y-1/2 text-xs ${
+            isOverLimit 
+              ? 'text-red-500 font-medium' 
+              : isNearLimit 
+                ? 'text-amber-500' 
+                : 'text-muted-foreground'
+          }`}>
+            {characterCount.toLocaleString()} / {MAX_MESSAGE_LENGTH.toLocaleString()}
+          </div>
           {/* Deep search indicator inside input when enabled */}
           {isDeepSearchEnabled && !isLoading && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+            <div className="absolute right-10 top-1/2 -translate-y-1/2">
               <Sparkles size={14} className="text-violet-500 animate-pulse" />
             </div>
           )}
@@ -119,9 +138,9 @@ export default function InputBox() {
         {/* Send button - larger touch target on mobile */}
         <button
           type="submit"
-          disabled={!message.trim() || isLoading}
+          disabled={!message.trim() || isLoading || isOverLimit}
           className={`p-2.5 md:p-3 rounded-xl transition-all touch-manipulation ${
-            isDeepSearchEnabled && message.trim()
+            isDeepSearchEnabled && message.trim() && !isOverLimit
               ? 'bg-violet-600 hover:bg-violet-700 text-white'
               : 'bg-primary text-primary-foreground hover:bg-primary/90'
           } disabled:opacity-50 disabled:cursor-not-allowed`}

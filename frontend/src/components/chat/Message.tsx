@@ -4,6 +4,7 @@ import { useChat } from '../../hooks/useChat'
 import { useSessions } from '../../hooks/useSessions'
 import { useChatStore } from '../../stores/chatStore'
 import ThinkingBlock from './ThinkingBlock'
+import MarkdownRenderer from './MarkdownRenderer'
 import { Copy, Check, GitFork, MoreHorizontal, ChevronDown, ChevronUp } from 'lucide-react'
 
 interface MessageProps {
@@ -135,9 +136,8 @@ export default function MessageComponent({ message }: MessageProps) {
 
         <div
           ref={contentRef}
-          className="whitespace-pre-wrap text-sm sm:text-base leading-relaxed"
         >
-          {displayContent}
+          <MarkdownRenderer content={displayContent} />
         </div>
 
         {needsTruncation && !isExpanded && (
