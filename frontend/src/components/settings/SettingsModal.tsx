@@ -320,7 +320,7 @@ function AgentSettingsTab({
   showTools?: boolean
   showSchema?: boolean
 }) {
-  const availableModels = MODELS[config.provider] || MODELS.antropic
+  const availableModels = MODELS[config.provider] || MODELS.anthropic
 
   return (
     <div className="space-y-4">
@@ -631,7 +631,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                 }`}
               >
                 <Server size={16} />
-                <span className="truncate">Database</span>
+                <span className="truncate">DB Agent</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="api-keys"

@@ -7,9 +7,10 @@ interface SidebarDrawerProps {
   isOpen: boolean
   onClose: () => void
   onNewChat: () => void
+  onSettingsClick?: () => void
 }
 
-export default function SidebarDrawer({ isOpen, onClose, onNewChat }: SidebarDrawerProps) {
+export default function SidebarDrawer({ isOpen, onClose, onNewChat, onSettingsClick }: SidebarDrawerProps) {
   const { sessions, activeSessionId, loadSession, isLoading } = useSessions()
 
   const handleSelectSession = async (sessionId: string) => {
@@ -106,7 +107,13 @@ export default function SidebarDrawer({ isOpen, onClose, onNewChat }: SidebarDra
           </div>
 
           <div className="p-2 border-t shrink-0">
-            <button className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-sm hover:bg-accent rounded-lg transition-colors touch-manipulation cursor-pointer">
+            <button 
+              onClick={() => {
+                onClose()
+                onSettingsClick?.()
+              }}
+              className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-sm hover:bg-accent rounded-lg transition-colors touch-manipulation cursor-pointer"
+            >
               <Settings size={16} />
               <span>Settings</span>
             </button>

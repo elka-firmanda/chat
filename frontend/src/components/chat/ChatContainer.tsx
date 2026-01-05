@@ -213,7 +213,7 @@ export default function ChatContainer() {
         {/* Welcome header */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8">
           <div className="w-16 h-16 md:w-20 md:h-20 bg-primary/10 rounded-2xl flex items-center justify-center mb-4 md:mb-6">
-            <MessageSquare size={32} className="md:size-40" />
+            <MessageSquare className="w-8 h-8 md:w-10 md:h-10" />
           </div>
           <h1 className="text-xl md:text-2xl font-semibold text-center mb-2">
             How can I help you today?
@@ -243,7 +243,6 @@ export default function ChatContainer() {
         onClose={handleCloseErrorModal}
         error={pendingError?.error || null}
         interventionOptions={pendingError?.intervention_options || { retry: true, skip: true, abort: true }}
-        sessionId={activeSessionId || ''}
         onRetry={handleRetry}
         onSkip={handleSkip}
         onAbort={handleAbort}
