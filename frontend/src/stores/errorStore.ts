@@ -79,7 +79,7 @@ export const useChatErrorStore = create<ChatErrorState>()(
     }),
     {
       name: 'chat-error-storage',
-      partialize: (state) => ({
+      partialize: (_state) => ({
         // Don't persist error state - it should be session-specific
         pendingError: undefined,
         isAwaitingIntervention: undefined,

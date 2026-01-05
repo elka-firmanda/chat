@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X, MessageSquare, Archive, Settings } from 'lucide-react'
 import { useSessions } from '../../hooks/useSessions'
-import { useChatStore } from '../../stores/chatStore'
 
 interface SidebarDrawerProps {
   isOpen: boolean

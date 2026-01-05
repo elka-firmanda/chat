@@ -97,7 +97,7 @@ export function useTimezone() {
 }
 
 export function useRelativeTime() {
-  const { timezone } = useTimezone()
+  useTimezone()
 
   const formatRelative = useCallback((dateString: string): string => {
     try {

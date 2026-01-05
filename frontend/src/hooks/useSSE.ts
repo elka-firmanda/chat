@@ -1,11 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { chatApi } from '../services/api'
 
-interface SSEEvent {
-  type: string
-  data: Record<string, unknown>
-}
-
 interface MemoryUpdateEvent {
   update_type: 'full' | 'incremental' | 'node_add' | 'node_update'
   memory_tree: Record<string, unknown>
@@ -292,9 +287,10 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         options.onMessageChunk?.(data)
       })
 
-      es.addEventListener('error', (e) => {
+      es.addEventListener('error', (e: Event) => {
+        const event = e as MessageEvent
         try {
-          const data = JSON.parse(e.data) as {
+          const data = JSON.parse(event.data) as {
             error: {
               error_type: string
               message: string
@@ -338,7 +334,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
 
           options.onError?.(data)
         } catch (parseError) {
-          const legacyData = JSON.parse(e.data) as { message: string; retry_count: number }
+          const legacyData = JSON.parse(event.data) as { message: string; retry_count: number }
           setError(legacyData.message)
           console.error('Error parsing SSE event:', parseError)
           console.error('Raw error data:', legacyData)
@@ -497,9 +493,10 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
       options.onMessageChunk?.(data)
     })
 
-      es.addEventListener('error', (e) => {
+      es.addEventListener('error', (e: Event) => {
+        const event = e as MessageEvent
         try {
-          const data = JSON.parse(e.data) as {
+          const data = JSON.parse(event.data) as {
             error: {
               error_type: string
               message: string
@@ -543,7 +540,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
 
           options.onError?.(data)
         } catch (parseError) {
-          const legacyData = JSON.parse(e.data) as { message: string; retry_count: number }
+          const legacyData = JSON.parse(event.data) as { message: string; retry_count: number }
           setError(legacyData.message)
           console.error('Error parsing SSE event:', parseError)
           console.error('Raw error data:', legacyData)

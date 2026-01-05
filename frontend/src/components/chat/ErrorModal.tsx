@@ -46,7 +46,6 @@ interface ErrorModalProps {
     skip: boolean
     abort: boolean
   }
-  sessionId: string
   onRetry: () => void
   onSkip: () => void
   onAbort: () => void
@@ -96,7 +95,6 @@ export default function ErrorModal({
   onClose,
   error,
   interventionOptions,
-  sessionId,
   onRetry,
   onSkip,
   onAbort,

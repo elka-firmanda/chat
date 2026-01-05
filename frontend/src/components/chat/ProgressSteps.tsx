@@ -40,7 +40,6 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
   }
   
   const getStatusIcon = (status: string, stepId: string) => {
-    const isRunning = status === 'running'
     const isExpanded = expandedSteps.has(stepId)
     
     switch (status) {

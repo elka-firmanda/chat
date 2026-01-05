@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Search, Sparkles, Info, AlertCircle } from 'lucide-react'
+import { Send, Search, Sparkles, Info } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { useChatStore } from '../../stores/chatStore'
 import { useChat } from '../../hooks/useChat'

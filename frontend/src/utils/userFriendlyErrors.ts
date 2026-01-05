@@ -152,7 +152,7 @@ const errorMessages: Record<ErrorType, UserFriendlyError> = {
 export function getUserFriendlyError(
   errorType: string,
   originalMessage?: string,
-  context?: Record<string, unknown>
+  _context?: Record<string, unknown>
 ): UserFriendlyError {
   const type = errorType as ErrorType
   const friendlyError = errorMessages[type] || errorMessages.unknown_error

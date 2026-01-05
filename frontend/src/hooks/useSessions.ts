@@ -50,10 +50,9 @@ export function useSessions() {
     
     try {
       const response = await sessionsApi.get(sessionId)
-      const { messages, ...sessionData } = response.data
       
       setActiveSession(sessionId)
-      useChatStore.getState().setMessages(sessionId, messages)
+      useChatStore.getState().setMessages(sessionId, response.data.messages)
       
       return response.data
     } catch (err) {

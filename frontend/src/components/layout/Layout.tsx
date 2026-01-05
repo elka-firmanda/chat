@@ -4,15 +4,17 @@ import { Menu } from 'lucide-react'
 import SidebarDrawer from './SidebarDrawer'
 import Header from './Header'
 import { useChatStore } from '../../stores/chatStore'
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  useKeyboardShortcuts()
 
   return (
     <div className="flex h-screen bg-background text-foreground">
       <aside className="hidden xl:flex w-64 bg-secondary/50 flex-col border-r shrink-0">
         <div className="flex-1 flex flex-col">
-          <Outlet />
         </div>
       </aside>
 
