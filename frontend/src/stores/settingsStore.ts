@@ -46,7 +46,9 @@ interface ConfigState {
     fast: { description: string; settings: Record<string, unknown> }
     deep: { description: string; settings: Record<string, unknown> }
   } | null
-  
+
+  shortcutsOpen: boolean
+
   isLoading: boolean
   error: string | null
   
@@ -59,6 +61,7 @@ interface ConfigState {
   migrateDatabase: (sqlitePath: string, postgresqlConnection: string) => Promise<{ success: boolean; message: string }>
   applyProfile: (profileName: string) => Promise<void>
   loadProfiles: () => Promise<void>
+  setShortcutsOpen: (open: boolean) => void
 }
 
 export const useSettingsStore = create<ConfigState>()((set, get) => ({
@@ -123,7 +126,9 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
   
   currentProfile: null,
   profiles: null,
-  
+
+  shortcutsOpen: false,
+
   isLoading: false,
   error: null,
   
@@ -261,5 +266,7 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
     } catch (error) {
       console.error('Failed to load profiles:', error)
     }
-  }
+  },
+
+  setShortcutsOpen: (open) => set({ shortcutsOpen: open })
 }))

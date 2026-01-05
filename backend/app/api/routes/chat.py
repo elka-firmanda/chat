@@ -12,6 +12,7 @@ Optimized for low latency (< 100ms):
 
 import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import AsyncGenerator, Dict, Any, Optional
@@ -33,9 +34,12 @@ from app.utils.streaming import (
     format_sse_event,
 )
 from app.utils.validators import sanitize_message_content
+from app.services.title_generator import generate_session_title, get_title_generator
 
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 class ChatMessageRequest(BaseModel):
@@ -178,13 +182,23 @@ async def send_message(
         if not chat_session:
             raise HTTPException(status_code=404, detail="Session not found")
     else:
-        title = (
-            sanitized_content[:50] + "..."
-            if len(sanitized_content) > 50
-            else sanitized_content
-        )
-        chat_session = await repo.create_session(title=title)
+        # Create session first with None title, then generate title with LLM
+        chat_session = await repo.create_session(title=None)
         session_id = chat_session.id
+
+        # Generate title asynchronously to avoid blocking the response
+        async def generate_and_update_title():
+            """Generate title and update session in background."""
+            try:
+                generated_title = await generate_session_title(sanitized_content)
+                if generated_title:
+                    await repo.update_session_title(session_id, generated_title)
+                    logger.info(f"Generated session title: {generated_title}")
+            except Exception as e:
+                logger.error(f"Failed to generate session title: {e}")
+
+        # Don't wait for title generation to avoid blocking
+        asyncio.create_task(generate_and_update_title())
 
     message = await repo.create_message(
         session_id=session_id,

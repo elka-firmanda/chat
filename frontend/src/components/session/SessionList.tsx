@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSessions } from '../../hooks/useSessions'
 import { useChatStore } from '../../stores/chatStore'
 import { sessionsApi } from '../../services/api'
-import { MessageSquare, Archive, Search, ChevronDown, ChevronRight, Download, MoreHorizontal, X, Clock, Unarchive, Trash2 } from 'lucide-react'
+import { MessageSquare, Archive, Search, ChevronDown, ChevronRight, Download, MoreHorizontal, X, Clock, ArchiveRestore, Trash2 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
 import { SkeletonSessionItem } from '../ui/Skeleton'
@@ -362,7 +362,7 @@ export default function SessionList() {
                           className="flex items-center gap-2 px-3 py-2 text-sm rounded-md outline-none hover:bg-accent cursor-pointer"
                           onSelect={(e: Event) => handleUnarchive(session.id, e)}
                         >
-                          <Unarchive size={14} />
+                          <ArchiveRestore size={14} />
                           <span>Unarchive</span>
                         </DropdownMenu.Item>
                         

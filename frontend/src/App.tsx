@@ -1,10 +1,14 @@
 import { BrowserRouter, Routes, Route, lazy, Suspense } from 'react-router-dom'
 import Layout from './components/layout/Layout'
 import ChatContainer from './components/chat/ChatContainer'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 
 const SettingsModal = lazy(() => import('./components/settings/SettingsModal'))
 
 function App() {
+  // Initialize keyboard shortcuts
+  useKeyboardShortcuts()
+
   return (
     <BrowserRouter>
       <Routes>

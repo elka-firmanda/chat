@@ -1,8 +1,9 @@
-import { Sun, Moon, Settings, Zap, Search, ChevronDown } from 'lucide-react'
+import { Sun, Moon, Settings, Zap, Search, ChevronDown, Keyboard } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useState, useEffect, useRef } from 'react'
 import SettingsModal from '../settings/SettingsModal'
 import { useSettingsStore } from '../../stores/settingsStore'
+import KeyboardShortcutsHelp from '../ui/KeyboardShortcutsHelp'
 
 const PROFILE_INFO = {
   fast: { label: 'Fast', icon: Zap, color: 'text-green-600', bg: 'bg-green-100' },
@@ -13,7 +14,7 @@ export default function Header() {
   const { theme, toggleTheme } = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const { currentProfile, profiles, loadProfiles, applyProfile } = useSettingsStore()
+  const { currentProfile, loadProfiles, applyProfile, shortcutsOpen, setShortcutsOpen } = useSettingsStore()
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -102,7 +103,15 @@ export default function Header() {
       >
         {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
       </button>
-      
+
+      <button
+        onClick={() => setShortcutsOpen(true)}
+        className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-accent transition-colors"
+        title="Keyboard shortcuts"
+      >
+        <Keyboard size={18} />
+      </button>
+
       <button 
         onClick={() => setSettingsOpen(true)}
         className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-accent transition-colors"
@@ -112,6 +121,7 @@ export default function Header() {
       </button>
 
       <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <KeyboardShortcutsHelp isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </>
   )
 }
