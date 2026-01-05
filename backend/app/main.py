@@ -43,9 +43,24 @@ async def lifespan(app: FastAPI):
 
     print("Shutting down Agentic Chatbot...")
 
+    # Use the centralized shutdown manager for graceful shutdown
     shutdown_manager = get_shutdown_manager()
 
-    active_queues = 0
+    try:
+        # Cancel all active session tasks
+        from app.utils.session_task_manager import get_session_task_manager
+
+        task_manager = get_session_task_manager()
+        active_sessions = task_manager.get_active_session_count()
+        if active_sessions > 0:
+            print(f"Cancelling {active_sessions} active sessions...")
+            result = await task_manager.shutdown_all_sessions(timeout=25.0)
+            print(
+                f"Session cancellation: {result['cancelled']} cancelled, {result['pending']} pending"
+            )
+    except Exception as e:
+        print(f"Warning: Could not cancel session tasks: {e}")
+
     try:
         from app.utils.streaming import event_manager
 
@@ -53,10 +68,14 @@ async def lifespan(app: FastAPI):
         if active_queues > 0:
             print(f"Closing {active_queues} active SSE event queues...")
             for session_id in list(event_manager._queues.keys()):
+                await event_manager.close(session_id)
                 await save_working_memory_state(session_id)
+            print("All SSE event queues closed")
     except Exception as e:
         print(f"Warning: Could not close event queues: {e}")
 
+    # Use the shutdown manager's complete shutdown (disposes engine, etc.)
+    # This is the final cleanup step
     if _engine is not None:
         print("Disposing database engine...")
         try:

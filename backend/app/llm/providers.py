@@ -9,7 +9,7 @@ import asyncio
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Dict, List, Optional, Any
+from typing import AsyncGenerator, AsyncIterator, Dict, List, Optional, Any
 from enum import Enum
 from functools import lru_cache
 import logging
@@ -103,9 +103,8 @@ class BaseLLMProvider(ABC):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-    ) -> AsyncIterator[StreamChunk]:
+    ) -> AsyncGenerator[StreamChunk, None]:
         """Send a streaming completion request to the LLM."""
-        pass
 
     def get_usage_stats(self) -> Dict[str, Any]:
         """Get usage statistics for this provider."""
@@ -306,7 +305,7 @@ class AnthropicProvider(BaseLLMProvider):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-    ) -> AsyncIterator[StreamChunk]:
+    ) -> AsyncGenerator[StreamChunk, None]:
         """Send streaming completion request to Anthropic."""
         start_time = time.perf_counter()
         accumulated_content = ""
@@ -509,7 +508,7 @@ class OpenAIProvider(BaseLLMProvider):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-    ) -> AsyncIterator[StreamChunk]:
+    ) -> AsyncGenerator[StreamChunk, None]:
         """Send streaming completion request to OpenAI."""
         start_time = time.perf_counter()
         accumulated_content = ""
@@ -705,7 +704,7 @@ class OpenRouterProvider(BaseLLMProvider):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-    ) -> AsyncIterator[StreamChunk]:
+    ) -> AsyncGenerator[StreamChunk, None]:
         """Send streaming completion request to OpenRouter."""
         start_time = time.perf_counter()
         accumulated_content = ""

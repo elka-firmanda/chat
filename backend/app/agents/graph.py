@@ -218,7 +218,7 @@ Guidelines:
         }
     ]
 
-    async for chunk in provider.stream_complete(
+    async for chunk in await provider.stream_complete(
         messages=messages,
         system_prompt=system_prompt,
         temperature=0.7,
@@ -707,7 +707,8 @@ async def database_agent(state: AgentState) -> AgentState:
     """Database agent - queries data warehouse."""
     from .database import database_agent as db_agent
 
-    return await db_agent(state)
+    result = await db_agent(dict(state))
+    return result  # type: ignore
 
 
 class StepAnalyzer:
@@ -993,7 +994,7 @@ def should_continue(state: AgentState) -> str:
     return "continue"
 
 
-def create_agent_graph() -> StateGraph:
+def create_agent_graph() -> Any:
     """Create the LangGraph state machine."""
     workflow = StateGraph(AgentState)
 

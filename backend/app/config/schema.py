@@ -147,3 +147,7 @@ class ConfigUpdate(BaseModel):
     agents: Optional[AgentsSettings] = None
     api_keys: Optional[APIKeys] = None
     profiles: Optional[Profiles] = None
+
+
+# Alias for backward compatibility
+AppConfig = Config

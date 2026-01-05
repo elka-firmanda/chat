@@ -141,7 +141,7 @@ class ShutdownManager:
                     logger.warning(f"{len(remaining)} tasks did not cancel in time")
 
     async def _close_event_queues(self) -> None:
-        """Close all SSE event queues."""
+        """Close all SSE event queues with notification."""
         try:
             from app.utils.streaming import event_manager
 
@@ -153,6 +153,18 @@ class ShutdownManager:
                     session_ids = list(event_manager._queues.keys())
 
                 for session_id in session_ids:
+                    # Emit shutdown event to notify clients
+                    try:
+                        await event_manager.emit_error(
+                            session_id=session_id,
+                            error="Server shutting down",
+                            error_type="shutdown",
+                            can_retry=False,
+                        )
+                    except Exception:
+                        pass  # Client may already be disconnected
+
+                    # Close the event queue
                     await event_manager.close(session_id)
 
                 logger.info("All SSE event queues closed")
@@ -204,8 +216,6 @@ class ShutdownManager:
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
             exit_code = 1
-
-        sys.exit(exit_code)
 
 
 _global_shutdown_manager: Optional[ShutdownManager] = None

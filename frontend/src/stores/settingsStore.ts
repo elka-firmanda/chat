@@ -195,8 +195,11 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
         pool_size: poolSize
       })
       return { valid: response.data.valid, message: response.data.message }
-    } catch (error) {
-      const message = error.response?.data?.message || 'Validation failed'
+    } catch (err) {
+      let message = 'Validation failed'
+      if (axios.isAxiosError(err) && err.response?.data?.message) {
+        message = err.response.data.message
+      }
       return { valid: false, message }
     }
   },
@@ -212,8 +215,11 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
       })
       set({ isLoading: false })
       return { success: true, message: response.data.message }
-    } catch (error) {
-      const message = error.response?.data?.message || 'Failed to switch database'
+    } catch (err) {
+      let message = 'Failed to switch database'
+      if (axios.isAxiosError(err) && err.response?.data?.message) {
+        message = err.response.data.message
+      }
       set({ isLoading: false, error: message })
       return { success: false, message }
     }
@@ -228,8 +234,11 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
       })
       set({ isLoading: false })
       return response.data
-    } catch (error) {
-      const message = error.response?.data?.message || 'Migration failed'
+    } catch (err) {
+      let message = 'Migration failed'
+      if (axios.isAxiosError(err) && err.response?.data?.message) {
+        message = err.response.data.message
+      }
       set({ isLoading: false, error: message })
       return { success: false, message }
     }

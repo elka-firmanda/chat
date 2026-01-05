@@ -166,6 +166,47 @@ class SessionTaskManager:
         """Get the number of active tasks for a session."""
         return len(self._session_tasks.get(session_id, set()))
 
+    async def shutdown_all_sessions(self, timeout: float = 30.0) -> Dict[str, Any]:
+        """
+        Cancel all active sessions during application shutdown.
+
+        Args:
+            timeout: Maximum time to wait for tasks to complete
+
+        Returns:
+            Dict with 'cancelled' and 'pending' counts and list of pending sessions
+        """
+        cancelled_count = 0
+        pending_sessions = []
+
+        # Copy session_ids to avoid modification during iteration
+        session_ids = list(self._session_tasks.keys())
+
+        for session_id in session_ids:
+            try:
+                success = await self.cancel_session(session_id)
+                if success:
+                    cancelled_count += 1
+                else:
+                    pending_sessions.append(session_id)
+            except Exception as e:
+                logger.error(f"Error cancelling session {session_id}: {e}")
+                pending_sessions.append(session_id)
+
+        # Wait for remaining tasks with timeout
+        if pending_sessions:
+            logger.info(f"Waiting for {len(pending_sessions)} sessions to complete...")
+            try:
+                await asyncio.sleep(timeout)
+            except asyncio.CancelledError:
+                pass
+
+        return {
+            "cancelled": cancelled_count,
+            "pending": len(pending_sessions),
+            "sessions": pending_sessions,
+        }
+
 
 _session_task_manager: Optional[SessionTaskManager] = None
 

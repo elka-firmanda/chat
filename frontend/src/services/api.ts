@@ -108,9 +108,11 @@ export const chatApi = {
       params: { session_id: sessionId }
     }),
   
-  stream: (sessionId: string) => {
-    const eventSource = new EventSource(`${API_URL}/v1/chat/stream/${sessionId}`)
-    return eventSource
+  stream: (sessionId: string, lastEventId?: string) => {
+    const url = lastEventId
+      ? `${API_URL}/v1/chat/stream/${sessionId}?lastEventId=${encodeURIComponent(lastEventId)}`
+      : `${API_URL}/v1/chat/stream/${sessionId}`
+    return new EventSource(url)
   },
   
   cancel: (sessionId: string) =>
@@ -203,8 +205,8 @@ export const toolsApi = {
   delete: (toolId: string) =>
     api.delete(`/tools/custom/${toolId}`),
   
-  execute: (toolId: string, arguments: Record<string, unknown>) =>
-    api.post<ToolExecuteResponse>(`/tools/custom/${toolId}/execute`, { arguments }),
+  execute: (toolId: string, args: Record<string, unknown>) =>
+    api.post<ToolExecuteResponse>(`/tools/custom/${toolId}/execute`, { arguments: args }),
   
   validate: (code: string) =>
     api.post<ToolValidateResponse>('/tools/validate', { code }),
