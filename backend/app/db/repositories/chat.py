@@ -173,6 +173,25 @@ class ChatRepository:
         )
         return result.scalar_one_or_none()
 
+    async def update_message(
+        self,
+        message_id: str,
+        content: Optional[str] = None,
+        extra_data: Optional[Dict] = None,
+    ) -> Optional[Message]:
+        """Update a message's content and extra_data."""
+        result = await self.session.execute(
+            select(Message).where(Message.id == message_id)
+        )
+        message = result.scalar_one_or_none()
+        if message:
+            if content is not None:
+                message.content = content
+            if extra_data is not None:
+                message.extra_data = {**(message.extra_data or {}), **extra_data}
+            await self.session.flush()
+        return message
+
     # Working memory operations
     async def get_working_memory(self, session_id: str) -> Optional[WorkingMemory]:
         """Get working memory for a session."""
@@ -239,10 +258,10 @@ class ChatRepository:
         logs: Optional[str] = None,
     ) -> Optional[AgentStep]:
         """Update an agent step."""
-        result = await self.session.execute(
+        query_result = await self.session.execute(
             select(AgentStep).where(AgentStep.id == step_id)
         )
-        step = result.scalar_one_or_none()
+        step = query_result.scalar_one_or_none()
         if step:
             if status:
                 step.status = status

@@ -1,21 +1,12 @@
 """
 SQLAlchemy database models for the agentic chatbot.
+Uses SQLAlchemy 2.0 Mapped types for proper type checking.
 """
 
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import (
-    Column,
-    String,
-    Text,
-    Integer,
-    Boolean,
-    DateTime,
-    ForeignKey,
-    JSON,
-    Index,
-)
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, JSON, Index
+from sqlalchemy.orm import DeclarativeBase, relationship, Mapped, mapped_column
 import uuid
 
 
@@ -42,14 +33,17 @@ class ChatSession(Base):
 
     __tablename__ = "chat_sessions"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    title = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
-    updated_at = Column(
+    # Use Mapped types for proper type checking
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
-    archived = Column(Boolean, default=False, nullable=False)
-    extra_data = Column(JSON, nullable=True)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    extra_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Relationships
     messages = relationship(
@@ -77,18 +71,26 @@ class Message(Base):
 
     __tablename__ = "messages"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    session_id = Column(
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
     )
-    role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
-    content = Column(Text, nullable=False)
-    agent_type = Column(
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # 'user', 'assistant', 'system'
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    agent_type: Mapped[Optional[str]] = mapped_column(
         String(20), nullable=True
     )  # 'master', 'planner', 'researcher', 'tools', 'database'
-    parent_message_id = Column(String(36), nullable=True)  # For conversation forking
-    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
-    extra_data = Column(JSON, nullable=True)  # tokens, cost, model, duration
+    parent_message_id: Mapped[Optional[str]] = mapped_column(
+        String(36), nullable=True
+    )  # For conversation forking
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    extra_data: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True
+    )  # tokens, cost, model, duration
 
     # Relationships
     session = relationship("ChatSession", back_populates="messages")
@@ -111,17 +113,23 @@ class WorkingMemory(Base):
 
     __tablename__ = "working_memory"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    session_id = Column(
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("chat_sessions.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
     )
-    memory_tree = Column(JSON, nullable=True)  # Hierarchical structure
-    timeline = Column(JSON, nullable=True)  # Flat execution log for UI
-    index_map = Column(JSON, nullable=True)  # Quick lookup by ID
-    updated_at = Column(
+    memory_tree: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True
+    )  # Hierarchical structure
+    timeline: Mapped[Optional[list]] = mapped_column(
+        JSON, nullable=True
+    )  # Flat execution log for UI
+    index_map: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True
+    )  # Quick lookup by ID
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
 
@@ -140,23 +148,27 @@ class AgentStep(Base):
 
     __tablename__ = "agent_steps"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    session_id = Column(
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
     )
-    message_id = Column(
+    message_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("messages.id", ondelete="CASCADE"), nullable=True
     )
-    step_number = Column(Integer, nullable=False)
-    agent_type = Column(String(20), nullable=True)
-    description = Column(Text, nullable=True)
-    status = Column(
+    step_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    agent_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
         String(20), default="pending", nullable=False
     )  # 'pending', 'running', 'completed', 'failed'
-    result = Column(Text, nullable=True)
-    logs = Column(Text, nullable=True)  # Expandable logs
-    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    logs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Expandable logs
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     session = relationship("ChatSession", back_populates="agent_steps")
@@ -176,12 +188,14 @@ class CustomTool(Base):
 
     __tablename__ = "custom_tools"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    name = Column(String(100), unique=True, nullable=False)
-    description = Column(Text, nullable=True)
-    code = Column(Text, nullable=False)  # Python code
-    enabled = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    code: Mapped[str] = mapped_column(Text, nullable=False)  # Python code
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
 
     def __repr__(self):
         return f"<CustomTool(id={self.id}, name={self.name}, enabled={self.enabled})>"
@@ -194,10 +208,12 @@ class Configuration(Base):
 
     __tablename__ = "configurations"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    config_json = Column(JSON, nullable=False)
-    version = Column(Integer, default=1, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    config_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
 
     def __repr__(self):
         return f"<Configuration(id={self.id}, version={self.version}, created_at={self.created_at})>"
