@@ -441,7 +441,7 @@ def create_error_sse_event(
     intervention_options: Optional[Dict[str, bool]] = None,
 ) -> Dict[str, Any]:
     """
-    Create an SSE event payload for error notification.
+    Create an SSE event payload for error notification with user-friendly details.
 
     Args:
         error: The error that occurred
@@ -449,8 +449,19 @@ def create_error_sse_event(
         intervention_options: Available intervention options
 
     Returns:
-        SSE event data dictionary
+        SSE event data dictionary with user-friendly messaging
     """
+    from app.utils.user_friendly_errors import (
+        get_user_friendly_error,
+        get_suggested_actions,
+    )
+
+    friendly = get_user_friendly_error(
+        error.error_type.value,
+        error.message,
+    )
+    suggested_actions = get_suggested_actions(error.error_type.value)
+
     return {
         "event_type": "error",
         "error": error.to_dict(),
@@ -462,6 +473,13 @@ def create_error_sse_event(
             "abort": True,
         },
         "timestamp": datetime.utcnow().isoformat(),
+        "user_friendly": {
+            "title": friendly.title,
+            "description": friendly.description,
+            "suggestion": friendly.suggestion,
+            "severity": friendly.severity,
+        },
+        "suggested_actions": suggested_actions,
     }
 
 

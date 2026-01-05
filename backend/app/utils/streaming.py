@@ -274,16 +274,28 @@ class SSEEventManager:
         error: str,
         error_type: str = "execution_error",
         can_retry: bool = True,
+        retry_count: int = 0,
+        max_retries: int = 3,
     ) -> None:
         """
-        Emit an error event.
+        Emit an error event with user-friendly messaging.
 
         Args:
             session_id: Session identifier
             error: Error message
             error_type: Type of error
             can_retry: Whether the operation can be retried
+            retry_count: Current retry attempt number
+            max_retries: Maximum retry attempts
         """
+        from app.utils.user_friendly_errors import (
+            get_user_friendly_error,
+            get_suggested_actions,
+        )
+
+        friendly = get_user_friendly_error(error_type, error)
+        suggested_actions = get_suggested_actions(error_type)
+
         await self.emit(
             session_id,
             "error",
@@ -291,7 +303,16 @@ class SSEEventManager:
                 "error": error,
                 "error_type": error_type,
                 "can_retry": can_retry,
+                "retry_count": retry_count,
+                "max_retries": max_retries,
                 "timestamp": datetime.utcnow().isoformat(),
+                "user_friendly": {
+                    "title": friendly.title,
+                    "description": friendly.description,
+                    "suggestion": friendly.suggestion,
+                    "severity": friendly.severity,
+                },
+                "suggested_actions": suggested_actions,
             },
         )
 
