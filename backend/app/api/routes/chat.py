@@ -32,6 +32,7 @@ from app.utils.streaming import (
     SSEEventManager,
     format_sse_event,
 )
+from app.utils.validators import sanitize_message_content
 
 
 router = APIRouter()
@@ -40,7 +41,9 @@ router = APIRouter()
 class ChatMessageRequest(BaseModel):
     """Request model for sending a chat message."""
 
-    content: str
+    content: str = Field(
+        ..., min_length=1, max_length=10000, description="User message content"
+    )
     deep_search: bool = False
     timezone: str = "UTC"
 
@@ -73,7 +76,22 @@ async def run_agent_with_events(
     Returns:
         Final state from agent execution
     """
+    from app.utils.session_task_manager import get_session_task_manager
+
+    task_manager = get_session_task_manager()
+    current_task = asyncio.current_task()
+
+    if current_task:
+        task_manager.register_task(session_id, current_task)
+
     try:
+        if task_manager.is_cancelled(session_id):
+            return {
+                "status": "cancelled",
+                "session_id": session_id,
+                "message": "Agent execution has been cancelled",
+            }
+
         await event_manager.emit_thought(
             session_id=session_id,
             agent="master",
@@ -88,6 +106,13 @@ async def run_agent_with_events(
             event_manager=event_manager,
         )
 
+        if task_manager.is_cancelled(session_id):
+            return {
+                "status": "cancelled",
+                "session_id": session_id,
+                "message": "Agent execution has been cancelled",
+            }
+
         await event_manager.emit_complete(
             session_id=session_id,
             message_id=message_id,
@@ -95,6 +120,19 @@ async def run_agent_with_events(
         )
 
         return final_state
+
+    except asyncio.CancelledError:
+        await event_manager.emit_error(
+            session_id=session_id,
+            error="Execution cancelled by user",
+            error_type="cancellation",
+            can_retry=False,
+        )
+        return {
+            "status": "cancelled",
+            "session_id": session_id,
+            "message": "Agent execution has been cancelled",
+        }
 
     except Exception as e:
         error_data = {
@@ -112,11 +150,9 @@ async def run_agent_with_events(
 
         return {"error": str(e), "session_id": session_id}
 
-    return {
-        "status": "cancelled",
-        "session_id": session_id,
-        "message": "Agent execution has been cancelled",
-    }
+    finally:
+        if current_task:
+            task_manager.unregister_task(session_id, current_task)
 
 
 @router.post("/message")
@@ -130,7 +166,10 @@ async def send_message(
 
     Creates a new session if session_id is not provided.
     Returns immediately with message_id for SSE streaming.
+    Sanitizes input to prevent XSS attacks.
     """
+    sanitized_content = sanitize_message_content(request.content, max_length=10000)
+
     repo = ChatRepository(db)
     config = config_manager.load()
 
@@ -140,9 +179,9 @@ async def send_message(
             raise HTTPException(status_code=404, detail="Session not found")
     else:
         title = (
-            request.content[:50] + "..."
-            if len(request.content) > 50
-            else request.content
+            sanitized_content[:50] + "..."
+            if len(sanitized_content) > 50
+            else sanitized_content
         )
         chat_session = await repo.create_session(title=title)
         session_id = chat_session.id
@@ -150,7 +189,7 @@ async def send_message(
     message = await repo.create_message(
         session_id=session_id,
         role="user",
-        content=request.content,
+        content=sanitized_content,
         extra_data={"deep_search": request.deep_search},
     )
 
@@ -172,7 +211,7 @@ async def send_message(
     asyncio.create_task(
         run_agent_with_events(
             session_id=session_id,
-            user_message=request.content,
+            user_message=sanitized_content,
             deep_search=request.deep_search,
             message_id=assistant_message.id,
             user_timezone=request.timezone,
@@ -225,17 +264,22 @@ async def cancel_execution(session_id: str):
     """
     Cancel ongoing agent execution for a session.
 
-    Sends termination signal to the event queue.
+    Sends termination signal to stop the agent workflow and close the event queue.
     """
     from app.utils.shutdown import cancel_session_execution
+    from app.utils.session_task_manager import get_session_task_manager
 
-    success = await cancel_session_execution(session_id)
+    task_manager = get_session_task_manager()
+    task_manager.get_cancellation_event(session_id).set()
+
+    task_success = await task_manager.cancel_session(session_id)
+    event_success = await cancel_session_execution(session_id)
 
     return {
-        "status": "cancelled" if success else "error",
+        "status": "cancelled" if (task_success or event_success) else "error",
         "session_id": session_id,
         "message": "Agent execution has been cancelled"
-        if success
+        if (task_success or event_success)
         else "Failed to cancel session",
     }
 
@@ -305,19 +349,18 @@ async def get_chat_history(
     """
     Get chat history for a session.
 
-    Returns all messages in the conversation.
+    Returns paginated messages with total count for client-side pagination.
     """
     repo = ChatRepository(db)
 
-    # Verify session exists
     session = await repo.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Get messages
     messages = await repo.get_messages(session_id, limit=limit, offset=offset)
+    total = await repo.get_message_count(session_id)
+    has_more = (offset + len(messages)) < total
 
-    # Get working memory
     working_memory = await repo.get_working_memory(session_id)
 
     return {
@@ -344,6 +387,8 @@ async def get_chat_history(
         "pagination": {
             "limit": limit,
             "offset": offset,
+            "total": total,
+            "has_more": has_more,
         },
     }
 

@@ -172,9 +172,6 @@ async def get_session(
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get a specific session with its messages.
-    """
     repo = ChatRepository(db)
     session = await repo.get_session(session_id)
 
@@ -182,6 +179,8 @@ async def get_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     messages = await repo.get_messages(session_id, limit=limit, offset=offset)
+    total = await repo.get_message_count(session_id)
+    has_more = (offset + len(messages)) < total
 
     return {
         "session": {
@@ -206,6 +205,10 @@ async def get_session(
             }
             for m in messages
         ],
+        "total": total,
+        "has_more": has_more,
+        "limit": limit,
+        "offset": offset,
     }
 
 

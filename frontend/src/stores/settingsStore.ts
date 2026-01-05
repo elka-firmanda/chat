@@ -15,6 +15,11 @@ interface GeneralSettings {
   timezone: string
   theme: 'light' | 'dark'
   example_questions: string[]
+  pagination: {
+    mode: 'button' | 'infinite' | 'virtual'
+    page_size: number
+    virtual_threshold: number
+  }
 }
 
 interface DatabaseSettings {
@@ -36,6 +41,12 @@ interface ConfigState {
   }
   api_keys: Record<string, string>
   
+  currentProfile: string | null
+  profiles: {
+    fast: { description: string; settings: Record<string, unknown> }
+    deep: { description: string; settings: Record<string, unknown> }
+  } | null
+  
   isLoading: boolean
   error: string | null
   
@@ -47,6 +58,7 @@ interface ConfigState {
   switchDatabase: (dbType: string, connectionString: string, poolSize: number) => Promise<{ success: boolean; message: string }>
   migrateDatabase: (sqlitePath: string, postgresqlConnection: string) => Promise<{ success: boolean; message: string }>
   applyProfile: (profileName: string) => Promise<void>
+  loadProfiles: () => Promise<void>
 }
 
 export const useSettingsStore = create<ConfigState>()((set, get) => ({
@@ -58,7 +70,12 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
       'Analyze my sales data for Q4',
       'How does quantum computing work?',
       'Generate a chart of user growth'
-    ]
+    ],
+    pagination: {
+      mode: 'button',
+      page_size: 30,
+      virtual_threshold: 100
+    }
   },
   database: {
     type: 'sqlite',
@@ -104,6 +121,9 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
   },
   api_keys: {},
   
+  currentProfile: null,
+  profiles: null,
+  
   isLoading: false,
   error: null,
   
@@ -118,6 +138,7 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
         database: data.database || get().database,
         agents: data.agents || get().agents,
         api_keys: data.api_keys || {},
+        currentProfile: data.current_profile || null,
         isLoading: false
       })
     } catch (error) {
@@ -217,6 +238,7 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
       
       set({
         agents: data.config.agents || get().agents,
+        currentProfile: profileName,
         isLoading: false
       })
     } catch (error) {
@@ -224,6 +246,20 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
         isLoading: false,
         error: `Failed to apply profile: ${profileName}`
       })
+    }
+  },
+  
+  loadProfiles: async () => {
+    try {
+      const response = await axios.get(`${API_URL}/v1/config/profiles`)
+      const data = response.data
+      
+      set({
+        profiles: data.profiles,
+        currentProfile: data.current_profile
+      })
+    } catch (error) {
+      console.error('Failed to load profiles:', error)
     }
   }
 }))
