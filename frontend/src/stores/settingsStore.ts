@@ -13,7 +13,7 @@ interface AgentSettings {
 
 interface GeneralSettings {
   timezone: string
-  theme: 'light' | 'dark'
+  theme: 'light' | 'dark' | 'system'
   example_questions: string[]
   pagination: {
     mode: 'button' | 'infinite' | 'virtual'
@@ -62,6 +62,7 @@ interface ConfigState {
   applyProfile: (profileName: string) => Promise<void>
   loadProfiles: () => Promise<void>
   setShortcutsOpen: (open: boolean) => void
+  syncThemeToStorage: (theme: 'light' | 'dark' | 'system') => void
 }
 
 export const useSettingsStore = create<ConfigState>()((set, get) => ({
@@ -277,5 +278,20 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
     }
   },
 
-  setShortcutsOpen: (open) => set({ shortcutsOpen: open })
+  setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
+
+  syncThemeToStorage: (theme) => {
+    localStorage.setItem('theme', theme)
+    const resolvedTheme = theme === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : theme
+    localStorage.setItem('system-theme', resolvedTheme)
+
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+    document.documentElement.setAttribute('data-theme', theme)
+  }
 }))

@@ -1,4 +1,4 @@
-import { Sun, Moon, Settings, Zap, Search, ChevronDown, Keyboard, Loader2, AlertCircle } from 'lucide-react'
+import { Sun, Moon, Monitor, Settings, Zap, Search, ChevronDown, Keyboard, Loader2, AlertCircle } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useState, useEffect, useRef } from 'react'
 import SettingsModal from '../settings/SettingsModal'
@@ -11,7 +11,7 @@ const PROFILE_INFO = {
 }
 
 export default function Header() {
-  const { theme, toggleTheme } = useTheme()
+  const { theme, toggleTheme, resolvedTheme } = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [switchingProfile, setSwitchingProfile] = useState<string | null>(null)
@@ -48,6 +48,17 @@ export default function Header() {
   }
 
   const currentProfileInfo = currentProfile ? PROFILE_INFO[currentProfile as keyof typeof PROFILE_INFO] : null
+
+  const getThemeIcon = () => {
+    if (theme === 'system') return <Monitor size={18} />
+    return resolvedTheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />
+  }
+
+  const getThemeTitle = () => {
+    if (theme === 'light') return 'Switch to dark mode'
+    if (theme === 'dark') return 'Switch to system preference'
+    return 'Switch to light mode'
+  }
 
   return (
     <>
@@ -116,12 +127,12 @@ export default function Header() {
         </div>
       )}
 
-      <button 
+      <button
         onClick={toggleTheme}
         className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-accent transition-colors"
-        title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+        title={getThemeTitle()}
       >
-        {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+        {getThemeIcon()}
       </button>
 
       <button
