@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { MessageSquare } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useChatErrorStore, PendingError } from '../../stores/errorStore'
@@ -50,19 +50,15 @@ export default function ChatContainer() {
     await sendMessage(question, isDeepSearchEnabled)
   }
 
-  // Auto-scroll to bottom when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [sessionMessages])
-
-  // SSE integration for real-time updates
-  useSSE(activeSessionId, {
-    onThought: (data) => {
+  // Memoize SSE handlers to prevent infinite re-render loops
+  // These must be stable references so useSSE doesn't re-run on every render
+  const sseHandlers = useMemo(() => ({
+    onThought: (data: { agent: string; content: string }) => {
       if (activeSessionId) {
         addThought(activeSessionId, data.agent, data.content)
       }
     },
-    onStepUpdate: (data) => {
+    onStepUpdate: (data: { step_id: string; status: string; description: string; logs?: string }) => {
       if (activeSessionId) {
         updateAgentStep(activeSessionId, data.step_id, {
           status: data.status as 'pending' | 'running' | 'completed' | 'failed',
@@ -70,17 +66,17 @@ export default function ChatContainer() {
         })
       }
     },
-    onMemoryUpdate: (data) => {
+    onMemoryUpdate: (data: { memory_tree: any; timeline: any; index: any; stats: any }) => {
       if (activeSessionId) {
         setWorkingMemory(activeSessionId, {
-          memory_tree: data.memory_tree as any,
-          timeline: data.timeline as any,
-          index: data.index as any,
+          memory_tree: data.memory_tree,
+          timeline: data.timeline,
+          index: data.index,
           stats: data.stats
         })
       }
     },
-    onNodeAdded: (data) => {
+    onNodeAdded: (data: { node_id: string; agent: string; node_type: string; description: string; parent_id?: string; timestamp: string }) => {
       if (activeSessionId) {
         setActiveNode(activeSessionId, data.node_id)
         addTimelineEntry(activeSessionId, {
@@ -94,15 +90,15 @@ export default function ChatContainer() {
         })
       }
     },
-    onNodeUpdated: (data) => {
+    onNodeUpdated: (data: { node_id: string; status?: string; content?: Record<string, unknown>; completed: boolean; timestamp: string }) => {
       if (activeSessionId) {
         updateNode(activeSessionId, data.node_id, {
-          status: data.status as 'pending' | 'running' | 'completed' | 'failed',
+          status: data.status as 'pending' | 'running' | 'completed' | 'failed' | undefined,
           content: data.content
         })
       }
     },
-    onTimelineUpdate: (data) => {
+    onTimelineUpdate: (data: { node_id: string; agent: string; node_type: string; description: string; status: string; parent_id?: string; timestamp: string }) => {
       if (activeSessionId) {
         addTimelineEntry(activeSessionId, {
           node_id: data.node_id,
@@ -115,10 +111,10 @@ export default function ChatContainer() {
         })
       }
     },
-    onMessageChunk: (data) => {
+    onMessageChunk: (data: { content: string }) => {
       if (activeSessionId) {
-        const sessionMessages = messages[activeSessionId] || []
-        const lastMessage = sessionMessages[sessionMessages.length - 1]
+        const currentMessages = messages[activeSessionId] || []
+        const lastMessage = currentMessages[currentMessages.length - 1]
 
         if (lastMessage && lastMessage.role === 'assistant') {
           updateMessage(activeSessionId, lastMessage.id, {
@@ -135,9 +131,15 @@ export default function ChatContainer() {
         }
       }
     },
-    onError: (data) => {
+    onError: (data: {
+      error: { error_type: string; message: string; timestamp: string; retry_count: number; max_retries: number; can_retry: boolean }
+      step_info?: { type: string; description: string; step_number: number }
+      intervention_options: { retry: boolean; skip: boolean; abort: boolean }
+      user_friendly?: { title: string; description: string; suggestion: string; severity: string }
+      suggested_actions?: string[]
+    }) => {
       console.error('SSE Error:', data)
-      
+
       // Set pending error for the modal
       const pendingErrorData: PendingError = {
         error: data.error,
@@ -148,20 +150,28 @@ export default function ChatContainer() {
       setPendingError(pendingErrorData)
       setIsIntervening(true)
     },
-    onRetry: (data) => {
+    onRetry: (data: { retry_count: number; max_retries: number; delay: number }) => {
       console.log('Retry attempt:', data)
     },
-    onIntervention: (data) => {
+    onIntervention: (data: { action: string; error: Record<string, unknown> | null }) => {
       console.log('User intervention:', data)
       setIsIntervening(false)
       clearErrorState()
     },
-    onComplete: (data) => {
+    onComplete: (data: { message_id: string }) => {
       console.log('Complete:', data)
       setIsIntervening(false)
       clearErrorState()
     }
-  })
+  }), [activeSessionId, addThought, updateAgentStep, setWorkingMemory, setActiveNode, addTimelineEntry, updateNode, messages, updateMessage, addMessage, setPendingError, clearErrorState])
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [sessionMessages])
+
+  // SSE integration for real-time updates - use memoized handlers to prevent infinite loops
+  useSSE(activeSessionId, sseHandlers)
 
   // Handle user intervention actions
   const handleRetry = async () => {

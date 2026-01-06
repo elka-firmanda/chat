@@ -26,14 +26,16 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen bg-background text-foreground">
-      <Sidebar
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        isLoading={isLoading}
-        onNewChat={handleNewChat}
-        onSelectSession={handleSelectSession}
-        onSettingsClick={() => setSettingsOpen(true)}
-      />
+      <aside className="hidden xl:block">
+        <Sidebar
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          isLoading={isLoading}
+          onNewChat={handleNewChat}
+          onSelectSession={handleSelectSession}
+          onSettingsClick={() => setSettingsOpen(true)}
+        />
+      </aside>
 
       <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
 

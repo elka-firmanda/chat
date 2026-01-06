@@ -340,6 +340,40 @@ class SSEEventManager:
             },
         )
 
+    async def emit_retry(
+        self,
+        session_id: str,
+        retry_count: int,
+        max_retries: int,
+        delay: float,
+        agent: str,
+        step_info: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Emit a retry event for automatic retry with exponential backoff.
+
+        Args:
+            session_id: Session identifier
+            retry_count: Current retry attempt number
+            max_retries: Maximum retry attempts
+            delay: Delay in seconds before retry
+            agent: Agent that encountered the error
+            step_info: Information about the step being retried
+        """
+        await self.emit(
+            session_id,
+            "retry",
+            {
+                "retry_count": retry_count,
+                "max_retries": max_retries,
+                "delay": delay,
+                "agent": agent,
+                "step_info": step_info,
+                "timestamp": datetime.utcnow().isoformat(),
+                "message": f"Retrying {agent} (attempt {retry_count}/{max_retries}) after {delay:.1f}s",
+            },
+        )
+
     async def emit_message_chunk(
         self,
         session_id: str,

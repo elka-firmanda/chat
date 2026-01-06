@@ -33,9 +33,9 @@ class ChatRepository:
         result = await self.session.execute(
             select(ChatSession)
             .options(
-                joinedload(ChatSession.messages),
-                joinedload(ChatSession.working_memory),
-                joinedload(ChatSession.agent_steps),
+                selectinload(ChatSession.messages),
+                selectinload(ChatSession.working_memory),
+                selectinload(ChatSession.agent_steps),
             )
             .where(ChatSession.id == session_id)
             .limit(1)
@@ -151,7 +151,7 @@ class ChatRepository:
     ) -> List[Message]:
         result = await self.session.execute(
             select(Message)
-            .options(joinedload(Message.agent_steps))
+            .options(selectinload(Message.agent_steps))
             .where(Message.session_id == session_id)
             .order_by(Message.created_at.asc())
             .limit(limit)

@@ -19,6 +19,7 @@ from typing import (
     Union,
     AsyncIterator,
     Callable,
+    Awaitable,
 )
 from enum import Enum
 from operator import add
@@ -44,8 +45,10 @@ from .error_handler import (
     create_error_sse_event,
     create_retry_sse_event,
     create_intervention_sse_event,
+    execute_with_retry,
 )
 from .types import AgentState, AgentType, StepType, StepStatus
+from app.utils.streaming import event_manager
 
 
 logger = logging.getLogger(__name__)
@@ -257,6 +260,7 @@ def create_initial_state(
         current_error=None,
         final_answer="",
         skip_planner=not deep_search_enabled,
+        retry_state=None,
     )
 
 
@@ -711,6 +715,125 @@ async def database_agent(state: AgentState) -> AgentState:
     return result  # type: ignore
 
 
+async def execute_agent_with_retry(
+    agent_func: Callable[[AgentState], Awaitable[AgentState]],
+    state: AgentState,
+    agent_name: str,
+) -> AgentState:
+    """
+    Execute an agent function with automatic retry logic.
+
+    Args:
+        agent_func: The agent async function to execute
+        state: Current agent state
+        agent_name: Name of the agent for logging and SSE events
+
+    Returns:
+        Updated state after agent execution (with possible retry)
+    """
+    session_id = state["session_id"]
+    max_retries = 3
+
+    current_plan = state.get("current_plan", [])
+    active_step = state.get("active_step", 0)
+    step_info = (
+        current_plan[active_step]
+        if current_plan and active_step < len(current_plan)
+        else None
+    )
+
+    retry_state = state.get("retry_state", {}) or {}
+    retry_count = retry_state.get(f"{agent_name}_retry_count", 0)
+
+    try:
+        return await agent_func(state)
+
+    except Exception as e:
+        error = AgentError.from_exception(
+            exception=e,
+            step_info=step_info,
+            context={"agent": agent_name, "session_id": session_id},
+        )
+        error.retry_count = retry_count
+
+        if error.can_retry and retry_count < max_retries:
+            new_retry_count = retry_count + 1
+            delay = error.get_retry_delay()
+
+            retry_state[f"{agent_name}_retry_count"] = new_retry_count
+            state["retry_state"] = retry_state
+            state["retry_count"] = new_retry_count
+
+            await event_manager.emit_retry(
+                session_id=session_id,
+                retry_count=new_retry_count,
+                max_retries=max_retries,
+                delay=delay,
+                agent=agent_name,
+                step_info=step_info,
+            )
+
+            logger.info(
+                f"Retrying {agent_name} (attempt {new_retry_count}/{max_retries}) "
+                f"after {delay:.1f}s. Error: {error.message}"
+            )
+
+            await asyncio.sleep(delay)
+
+            return await agent_func(state)
+
+        else:
+            state["error_log"] = state.get("error_log", []) + [
+                {
+                    "timestamp": error.timestamp,
+                    "error_type": error.error_type.value,
+                    "message": error.message,
+                    "step_info": step_info,
+                    "retry_count": retry_count,
+                    "handled": False,
+                }
+            ]
+
+            intervention_state = get_intervention_state(session_id)
+            intervention_state.set_pending_error(error)
+            state["awaiting_intervention"] = True
+            state["current_error"] = error.to_dict()
+
+            error_event = create_error_sse_event(error=error, step_info=step_info)
+            await event_manager.emit(
+                session_id=session_id,
+                event_type="error",
+                data=error_event,
+            )
+
+            return state
+
+
+async def master_agent_with_retry(state: AgentState) -> AgentState:
+    """Master agent with retry wrapper."""
+    return await execute_agent_with_retry(master_agent, state, "master")
+
+
+async def planner_agent_with_retry(state: AgentState) -> AgentState:
+    """Planner agent with retry wrapper."""
+    return await execute_agent_with_retry(planner_agent, state, "planner")
+
+
+async def researcher_agent_with_retry(state: AgentState) -> AgentState:
+    """Researcher agent with retry wrapper."""
+    return await execute_agent_with_retry(researcher_agent, state, "researcher")
+
+
+async def tools_agent_with_retry(state: AgentState) -> AgentState:
+    """Tools agent with retry wrapper."""
+    return await execute_agent_with_retry(tools_agent, state, "tools")
+
+
+async def database_agent_with_retry(state: AgentState) -> AgentState:
+    """Database agent with retry wrapper."""
+    return await execute_agent_with_retry(database_agent, state, "database")
+
+
 class StepAnalyzer:
     """Analyzes plan steps to determine which can run in parallel."""
 
@@ -995,14 +1118,14 @@ def should_continue(state: AgentState) -> str:
 
 
 def create_agent_graph() -> Any:
-    """Create the LangGraph state machine."""
+    """Create the LangGraph state machine with retry-enabled agent nodes."""
     workflow = StateGraph(AgentState)
 
-    workflow.add_node("master", master_agent)
-    workflow.add_node("planner", planner_agent)
-    workflow.add_node("researcher", researcher_agent)
-    workflow.add_node("tools", tools_agent)
-    workflow.add_node("database", database_agent)
+    workflow.add_node("master", master_agent_with_retry)
+    workflow.add_node("planner", planner_agent_with_retry)
+    workflow.add_node("researcher", researcher_agent_with_retry)
+    workflow.add_node("tools", tools_agent_with_retry)
+    workflow.add_node("database", database_agent_with_retry)
 
     workflow.set_entry_point("master")
 

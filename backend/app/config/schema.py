@@ -6,6 +6,25 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
 
+# Rate limiting settings
+class RateLimitEndpointSettings(BaseModel):
+    requests: int = Field(default=30, ge=1, description="Maximum requests allowed")
+    window_seconds: int = Field(default=60, ge=1, description="Time window in seconds")
+
+
+class RateLimitingSettings(BaseModel):
+    enabled: bool = Field(default=True, description="Enable rate limiting")
+    endpoints: Dict[str, RateLimitEndpointSettings] = Field(
+        default_factory=lambda: {
+            "chat_message": RateLimitEndpointSettings(requests=10, window_seconds=60),
+            "chat_stream": RateLimitEndpointSettings(requests=5, window_seconds=60),
+            "config_update": RateLimitEndpointSettings(requests=5, window_seconds=60),
+            "default": RateLimitEndpointSettings(requests=30, window_seconds=60),
+        },
+        description="Rate limit configuration per endpoint",
+    )
+
+
 # General settings
 class GeneralSettings(BaseModel):
     timezone: str = "auto"
@@ -137,6 +156,7 @@ class Config(BaseModel):
     agents: AgentsSettings = Field(default_factory=AgentsSettings)
     api_keys: APIKeys = Field(default_factory=APIKeys)
     profiles: Profiles = Field(default_factory=Profiles)
+    rate_limiting: RateLimitingSettings = Field(default_factory=RateLimitingSettings)
     current_profile: Optional[str] = None
 
 
@@ -147,6 +167,7 @@ class ConfigUpdate(BaseModel):
     agents: Optional[AgentsSettings] = None
     api_keys: Optional[APIKeys] = None
     profiles: Optional[Profiles] = None
+    rate_limiting: Optional[RateLimitingSettings] = None
 
 
 # Alias for backward compatibility

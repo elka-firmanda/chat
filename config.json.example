@@ -117,5 +117,34 @@
       "master": {"model": "claude-3-opus-20240229"},
       "researcher": {"max_urls_to_scrape": 10}
     }
+  },
+
+  // Rate limiting configuration
+  "rate_limiting": {
+    // Enable or disable rate limiting
+    "enabled": true,
+    // Rate limits per endpoint
+    "endpoints": {
+      // POST /chat/message: 10 requests per minute
+      "chat_message": {
+        "requests": 10,
+        "window_seconds": 60
+      },
+      // GET /chat/stream: 5 concurrent connections per IP
+      "chat_stream": {
+        "requests": 5,
+        "window_seconds": 60
+      },
+      // POST /config: 5 requests per minute
+      "config_update": {
+        "requests": 5,
+        "window_seconds": 60
+      },
+      // Default limit for all other endpoints
+      "default": {
+        "requests": 30,
+        "window_seconds": 60
+      }
+    }
   }
 }

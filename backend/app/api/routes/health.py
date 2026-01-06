@@ -260,3 +260,35 @@ async def config_status():
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@router.get("/rate-limit")
+async def rate_limit_status():
+    """
+    Get rate limiting status and configuration.
+    """
+    from app.utils.rate_limiter import get_rate_limiter
+
+    limiter = get_rate_limiter()
+    config = get_config()
+    rate_limit_config = getattr(config, "rate_limiting", None)
+
+    if rate_limit_config:
+        return {
+            "enabled": limiter.is_enabled(),
+            "endpoints": {
+                key: {
+                    "requests": value.requests,
+                    "window_seconds": value.window_seconds,
+                }
+                for key, value in rate_limit_config.endpoints.items()
+            }
+            if hasattr(rate_limit_config, "endpoints")
+            else {},
+        }
+    else:
+        return {
+            "enabled": limiter.is_enabled(),
+            "endpoints": {},
+            "status": "using_defaults",
+        }

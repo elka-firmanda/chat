@@ -4,7 +4,7 @@ Main FastAPI application for the Agentic Chatbot.
 
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -16,6 +16,7 @@ from app.utils.shutdown import (
     create_shutdown_handler,
     save_working_memory_state,
 )
+from app.utils.rate_limiter import get_rate_limiter, apply_rate_limit_config
 
 
 @asynccontextmanager
@@ -36,6 +37,21 @@ async def lifespan(app: FastAPI):
     try:
         config = config_manager.load()
         print(f"Configuration loaded: {config.version}")
+
+        # Initialize rate limiting from config
+        rate_limiting_config = config.rate_limiting
+        rate_limit_dict = {
+            "enabled": rate_limiting_config.enabled,
+            "endpoints": {
+                key: {
+                    "requests": value.requests,
+                    "window_seconds": value.window_seconds,
+                }
+                for key, value in rate_limiting_config.endpoints.items()
+            },
+        }
+        apply_rate_limit_config(rate_limit_dict)
+        print(f"Rate limiting enabled: {rate_limiting_config.enabled}")
     except Exception as e:
         print(f"Warning: Could not load configuration: {e}")
 
@@ -105,6 +121,60 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """
+    Rate limiting middleware for all endpoints.
+
+    Applies endpoint-specific rate limits based on the request path.
+    """
+    rate_limiter = get_rate_limiter()
+
+    if not rate_limiter.is_enabled():
+        return await call_next(request)
+
+    # Determine endpoint key based on path
+    path = request.url.path
+    method = request.method
+
+    endpoint_key = "default"
+    is_concurrent = False
+
+    if path == "/api/v1/chat/message" and method == "POST":
+        endpoint_key = "chat_message"
+    elif "/api/v1/chat/stream/" in path and method == "GET":
+        endpoint_key = "chat_stream"
+        is_concurrent = True
+    elif path == "/api/v1/config" and method == "POST":
+        endpoint_key = "config_update"
+
+    # Check rate limit
+    is_allowed, response = await rate_limiter.check_rate_limit(
+        request,
+        endpoint_key=endpoint_key,
+        is_concurrent=is_concurrent,
+    )
+
+    if not is_allowed:
+        return response
+
+    # Process request
+    try:
+        response = await call_next(request)
+
+        # Add rate limit headers to successful responses
+        if response.status_code < 400:
+            limiter = get_rate_limiter()
+            config = limiter.get_config(endpoint_key)
+            response.headers["X-RateLimit-Limit"] = str(config.requests)
+
+        return response
+    finally:
+        # Release concurrent connection slot if applicable
+        if is_concurrent and rate_limiter.is_enabled():
+            await rate_limiter.release_concurrent(request, endpoint_key)
 
 
 # Include routers

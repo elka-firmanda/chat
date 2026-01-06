@@ -8,6 +8,7 @@ Uses LLM to generate structured plans based on user queries.
 from typing import Dict, List, Any, Optional
 import json
 import logging
+from pydantic import BaseModel, Field, field_validator
 
 from app.config.config_manager import get_config
 from app.llm.providers import LLMProviderFactory, BaseLLMProvider
@@ -26,6 +27,78 @@ class StepType:
     CHART = "chart"
     THINK = "think"
     REVIEW = "review"
+
+
+class PlanStep(BaseModel):
+    """Schema for a single plan step."""
+
+    step_number: int = Field(..., ge=1, description="Step number (1-indexed)")
+    type: str = Field(
+        ...,
+        description="Step type (research, code, database, calculate, chart, think, review)",
+    )
+    description: str = Field(
+        ..., min_length=1, max_length=500, description="Brief description of the step"
+    )
+    agent: str = Field(..., description="Agent responsible for this step")
+    expected_output: str = Field(
+        ..., min_length=1, description="Expected output from this step"
+    )
+    depends_on: Optional[List[int]] = Field(
+        default=None, description="Step numbers this step depends on"
+    )
+    skip: bool = Field(default=False, description="Whether to skip this step")
+
+    @field_validator("type")
+    @classmethod
+    def validate_step_type(cls, v: str) -> str:
+        """Validate step type is one of the allowed types."""
+        valid_types = {
+            StepType.RESEARCH,
+            StepType.CODE,
+            StepType.DATABASE,
+            StepType.CALCULATE,
+            StepType.CHART,
+            StepType.THINK,
+            StepType.REVIEW,
+        }
+        if v not in valid_types:
+            logger.warning(f"Unknown step type '{v}', allowing but may cause issues")
+        return v
+
+
+class Plan(BaseModel):
+    """Schema for a complete execution plan."""
+
+    steps: List[PlanStep] = Field(..., description="List of plan steps")
+
+    @field_validator("steps")
+    @classmethod
+    def validate_steps_not_empty(cls, v: List[PlanStep]) -> List[PlanStep]:
+        """Ensure plan has at least one step."""
+        if not v:
+            raise ValueError("Plan must have at least one step")
+        return v
+
+    @field_validator("steps")
+    @classmethod
+    def validate_step_numbers(cls, v: List[PlanStep]) -> List[PlanStep]:
+        """Ensure step numbers are sequential."""
+        step_numbers = [step.step_number for step in v]
+        expected = list(range(1, len(v) + 1))
+        if step_numbers != expected:
+            logger.warning(
+                f"Step numbers are not sequential. Expected {expected}, got {step_numbers}. Re-indexing."
+            )
+            for i, step in enumerate(v):
+                step.step_number = i + 1
+        return v
+
+
+class PlanGenerationError(Exception):
+    """Raised when plan generation fails."""
+
+    pass
 
 
 _planner_llm_provider: Optional[BaseLLMProvider] = None
@@ -50,7 +123,6 @@ def get_planner_llm_provider() -> BaseLLMProvider:
     return _planner_llm_provider
 
 
-# System prompt for the planner agent
 PLANNER_SYSTEM_PROMPT = """You are a planning specialist for a multi-agent AI system. Your job is to create step-by-step execution plans that break down complex user queries into manageable steps.
 
 For each plan, you must:
@@ -71,24 +143,26 @@ Step types and their purposes:
 Always start with understanding the request, then plan the necessary steps in logical order.
 Steps that depend on previous results should come later in the plan.
 
-Return your plan as a JSON array of steps with this format:
+IMPORTANT: You must respond with valid JSON that matches this schema:
 ```json
-[
-  {
-    "step_number": 1,
-    "type": "think",
-    "description": "Analyze the user's question about X",
-    "agent": "master",
-    "expected_output": "Clear understanding of what's needed"
-  },
-  {
-    "step_number": 2,
-    "type": "research",
-    "description": "Find information about X",
-    "agent": "researcher",
-    "expected_output": "List of relevant sources and key findings"
-  }
-]
+{
+  "steps": [
+    {
+      "step_number": 1,
+      "type": "think",
+      "description": "Analyze the user's question about X",
+      "agent": "master",
+      "expected_output": "Clear understanding of what's needed"
+    },
+    {
+      "step_number": 2,
+      "type": "research",
+      "description": "Find information about X",
+      "agent": "researcher",
+      "expected_output": "List of relevant sources and key findings"
+    }
+  ]
+}
 ```
 
 For re-planning (when previous plan needs modification):
@@ -134,6 +208,9 @@ class Planner:
 
         Returns:
             List of step dictionaries
+
+        Raises:
+            PlanGenerationError: If plan generation fails
         """
         if self.llm:
             return await self._generate_plan_with_llm(user_message, deep_search)
@@ -157,6 +234,9 @@ class Planner:
 
         Returns:
             Modified plan with version incremented
+
+        Raises:
+            PlanGenerationError: If replanning fails
         """
         if self.llm:
             return await self._replan_with_llm(user_message, previous_plan, findings)
@@ -167,7 +247,7 @@ class Planner:
         user_message: str,
         deep_search: bool,
     ) -> List[Dict[str, Any]]:
-        """Generate plan using LLM."""
+        """Generate plan using LLM with JSON mode."""
         if not self.llm:
             return self._create_default_plan(user_message, deep_search)
 
@@ -184,13 +264,19 @@ class Planner:
                 messages=messages,
                 temperature=0.3,
                 max_tokens=2000,
+                json_mode=True,
             )
 
-            # Parse JSON from response
-            return self._parse_plan_response(response.content)
+            plan_data = self._parse_plan_response(response.content)
+            validated_plan = self._validate_plan(plan_data)
+
+            return [step.model_dump() for step in validated_plan.steps]
+        except PlanGenerationError as e:
+            logger.error(f"Plan validation failed: {e}")
+            raise PlanGenerationError(f"Invalid plan structure: {e}")
         except Exception as e:
             logger.error(f"LLM plan generation failed: {e}")
-            return self._create_default_plan(user_message, deep_search)
+            raise PlanGenerationError(f"Failed to generate plan: {e}")
 
     async def _replan_with_llm(
         self,
@@ -217,6 +303,21 @@ New findings from subagents:
 {json.dumps(findings, indent=2)}
 
 Analyze the findings and create an updated plan. Keep valid steps from the previous plan, add new steps if needed, and mark any steps that should be skipped due to the new information.
+
+Respond with valid JSON matching this schema:
+```json
+{{
+  "steps": [
+    {{
+      "step_number": 1,
+      "type": "...",
+      "description": "...",
+      "agent": "...",
+      "expected_output": "..."
+    }}
+  ]
+}}
+```
 """,
             },
         ]
@@ -226,36 +327,54 @@ Analyze the findings and create an updated plan. Keep valid steps from the previ
                 messages=messages,
                 temperature=0.4,
                 max_tokens=2000,
+                json_mode=True,
             )
-            return self._parse_plan_response(response.content)
+
+            plan_data = self._parse_plan_response(response.content)
+            validated_plan = self._validate_plan(plan_data)
+
+            return [step.model_dump() for step in validated_plan.steps]
+        except PlanGenerationError as e:
+            logger.error(f"Replan validation failed: {e}")
+            raise PlanGenerationError(f"Invalid replan structure: {e}")
         except Exception as e:
             logger.error(f"LLM replanning failed: {e}")
-            return self._create_replan_default(previous_plan, findings)
+            raise PlanGenerationError(f"Failed to replan: {e}")
 
-    def _parse_plan_response(self, content: str) -> List[Dict[str, Any]]:
+    def _parse_plan_response(self, content: str) -> Dict[str, Any]:
         """Parse JSON plan from LLM response."""
         try:
-            # Try to extract JSON from response
-            if "```json" in content:
+            content = content.strip()
+
+            if content.startswith("```json"):
                 content = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
+            elif content.startswith("```"):
                 content = content.split("```")[1].split("```")[0]
 
-            plan = json.loads(content)
+            content = content.strip()
 
-            # Ensure plan is a list
-            if isinstance(plan, dict):
-                plan = plan.get("steps", plan.get("plan", [plan]))
+            plan_data = json.loads(content)
 
-            # Add step numbers if not present
-            for i, step in enumerate(plan):
-                if "step_number" not in step:
-                    step["step_number"] = i + 1
+            if isinstance(plan_data, list):
+                plan_data = {"steps": plan_data}
 
-            return plan
+            if "steps" not in plan_data:
+                raise PlanGenerationError("Response does not contain 'steps' field")
+
+            return plan_data
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse plan JSON: {e}")
-            return []
+            raise PlanGenerationError(f"Failed to parse JSON response: {e}")
+        except PlanGenerationError:
+            raise
+        except Exception as e:
+            raise PlanGenerationError(f"Unexpected error parsing response: {e}")
+
+    def _validate_plan(self, plan_data: Dict[str, Any]) -> Plan:
+        """Validate plan data against schema."""
+        try:
+            return Plan.model_validate(plan_data)
+        except Exception as e:
+            raise PlanGenerationError(f"Schema validation failed: {e}")
 
     def _create_default_plan(
         self,
@@ -265,7 +384,6 @@ Analyze the findings and create an updated plan. Keep valid steps from the previ
         """Create a simple default plan without LLM."""
         plan = []
 
-        # Always start with thinking
         plan.append(
             {
                 "step_number": 1,
@@ -287,7 +405,6 @@ Analyze the findings and create an updated plan. Keep valid steps from the previ
                 }
             )
 
-        # Always end with review
         plan.append(
             {
                 "step_number": len(plan) + 1,
@@ -306,17 +423,13 @@ Analyze the findings and create an updated plan. Keep valid steps from the previ
         findings: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
         """Create a modified plan without LLM."""
-        # Keep previous plan and add a review step at the end
         new_plan = [step.copy() for step in previous_plan]
 
-        # Check if findings indicate we need new steps
         if findings.get("requires_replan", False):
-            # Add research step if not present
             has_research = any(
                 step.get("type") == StepType.RESEARCH for step in new_plan
             )
             if not has_research:
-                # Insert research step after thinking
                 research_step = {
                     "step_number": 2,
                     "type": StepType.RESEARCH,
@@ -326,14 +439,12 @@ Analyze the findings and create an updated plan. Keep valid steps from the previ
                 }
                 new_plan.insert(1, research_step)
 
-        # Renumber steps
         for i, step in enumerate(new_plan):
             step["step_number"] = i + 1
 
         return new_plan
 
 
-# Default planner instance with LLM provider
 default_planner = Planner(llm_provider=get_planner_llm_provider())
 
 
@@ -360,7 +471,6 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     if state.get("working_memory"):
         await memory.load(state["working_memory"])
 
-    # Add planner thought
     node_id = await memory.add_node(
         agent="planner",
         node_type="thought",
@@ -369,7 +479,6 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         if requires_replan and current_plan:
-            # Re-plan with findings
             plan = await default_planner.replan(
                 user_message=user_message,
                 previous_plan=current_plan,
@@ -377,14 +486,12 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                 session_id=session_id,
             )
         else:
-            # Create initial plan
             plan = await default_planner.create_plan(
                 user_message=user_message,
                 session_id=session_id,
                 deep_search=deep_search,
             )
 
-        # Add plan result node
         plan_node_id = await memory.add_node(
             agent="planner",
             node_type="result",
@@ -393,7 +500,6 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             content=plan,
         )
 
-        # Create step nodes
         for step in plan:
             await memory.add_node(
                 agent="planner",
@@ -405,13 +511,27 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                 content=step,
             )
 
-        # Update state
         state["current_plan"] = plan
         state["active_step"] = 0
         state["requires_replan"] = False
         state["planner_output"] = {
             "plan": plan,
             "version": state.get("plan_version", 1),
+        }
+
+    except PlanGenerationError as e:
+        logger.error(f"Planner agent plan generation error: {e}")
+        state["error_log"].append(
+            {
+                "agent": "planner",
+                "error": str(e),
+                "error_type": "plan_generation",
+            }
+        )
+        state["planner_output"] = {
+            "plan": [],
+            "version": state.get("plan_version", 1),
+            "error": str(e),
         }
 
     except Exception as e:
@@ -422,6 +542,11 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                 "error": str(e),
             }
         )
+        state["planner_output"] = {
+            "plan": [],
+            "version": state.get("plan_version", 1),
+            "error": str(e),
+        }
 
     await memory.update_node(node_id, completed=True, status="completed")
     state["working_memory"] = await memory.to_dict()

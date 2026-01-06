@@ -92,6 +92,7 @@ class BaseLLMProvider(ABC):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Send a completion request to the LLM."""
         pass
@@ -103,6 +104,7 @@ class BaseLLMProvider(ABC):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        json_mode: bool = False,
     ) -> AsyncGenerator[StreamChunk, None]:
         """Send a streaming completion request to the LLM."""
 
@@ -261,6 +263,7 @@ class AnthropicProvider(BaseLLMProvider):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Send completion request to Anthropic."""
         start_time = time.perf_counter()
@@ -268,6 +271,9 @@ class AnthropicProvider(BaseLLMProvider):
         request_body = self._prepare_messages(
             messages, system_prompt or self.config.system_prompt
         )
+
+        if json_mode:
+            request_body["response_format"] = {"type": "json_object"}
 
         def sync_complete():
             return self.client.messages.create(
@@ -453,6 +459,7 @@ class OpenAIProvider(BaseLLMProvider):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Send completion request to OpenAI."""
         start_time = time.perf_counter()
@@ -467,7 +474,7 @@ class OpenAIProvider(BaseLLMProvider):
 
         chat_messages.extend(messages)
 
-        request = self.client.chat.completions.create(
+        request_kwargs = dict(
             model=self.config.model,
             messages=chat_messages,
             temperature=temperature or self.config.temperature,
@@ -476,6 +483,11 @@ class OpenAIProvider(BaseLLMProvider):
             or self.config.max_tokens,
             stream=False,
         )
+
+        if json_mode:
+            request_kwargs["response_format"] = {"type": "json_object"}
+
+        request = self.client.chat.completions.create(**request_kwargs)
 
         response = await self._with_retry(request)
 
@@ -649,6 +661,7 @@ class OpenRouterProvider(BaseLLMProvider):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Send completion request to OpenRouter."""
         start_time = time.perf_counter()
@@ -663,7 +676,7 @@ class OpenRouterProvider(BaseLLMProvider):
 
         chat_messages.extend(messages)
 
-        request = self.client.chat.completions.create(
+        request_kwargs = dict(
             model=self.config.model,
             messages=chat_messages,
             temperature=temperature or self.config.temperature,
@@ -672,6 +685,11 @@ class OpenRouterProvider(BaseLLMProvider):
             or self.config.max_tokens,
             stream=False,
         )
+
+        if json_mode:
+            request_kwargs["response_format"] = {"type": "json_object"}
+
+        request = self.client.chat.completions.create(**request_kwargs)
 
         response = await self._with_retry(request)
 

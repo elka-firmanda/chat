@@ -80,17 +80,6 @@ export default function Header() {
                   <span className="ml-auto text-xs text-purple-600">Active</span>
                 )}
               </button>
-              <div className="border-t my-1" />
-              <button
-                onClick={() => {
-                  setProfileMenuOpen(false)
-                  setSettingsOpen(true)
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors text-muted-foreground"
-              >
-                <Settings size={14} />
-                <span>All Settings</span>
-              </button>
             </div>
           )}
         </div>
