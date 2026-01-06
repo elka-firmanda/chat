@@ -8,15 +8,11 @@
     <script>
       (function() {
         var stored = localStorage.getItem('theme');
-        var theme = 'system';
-        if (stored && ['light', 'dark', 'system'].indexOf(stored) !== -1) {
+        var theme = 'light';
+        if (stored && ['light', 'dark'].indexOf(stored) !== -1) {
           theme = stored;
         }
-        var resolved = theme;
-        if (theme === 'system') {
-          resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        }
-        if (resolved === 'dark') {
+        if (theme === 'dark') {
           document.documentElement.classList.add('dark');
         }
         document.documentElement.setAttribute('data-theme', theme);

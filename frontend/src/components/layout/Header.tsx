@@ -1,4 +1,4 @@
-import { Sun, Moon, Monitor, Settings, Keyboard } from 'lucide-react'
+import { Sun, Moon, Settings, Keyboard } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useState } from 'react'
 import SettingsModal from '../settings/SettingsModal'
@@ -11,14 +11,11 @@ export default function Header() {
   const { shortcutsOpen, setShortcutsOpen } = useSettingsStore()
 
   const getThemeIcon = () => {
-    if (theme === 'system') return <Monitor size={18} />
     return resolvedTheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />
   }
 
   const getThemeTitle = () => {
-    if (theme === 'light') return 'Switch to dark mode'
-    if (theme === 'dark') return 'Switch to system preference'
-    return 'Switch to light mode'
+    return theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'
   }
 
   return (
