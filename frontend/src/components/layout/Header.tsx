@@ -1,4 +1,4 @@
-import { Sun, Moon, Settings, Zap, Search, ChevronDown, Keyboard } from 'lucide-react'
+import { Sun, Moon, Settings, Zap, Search, ChevronDown, Keyboard, Loader2, AlertCircle } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useState, useEffect, useRef } from 'react'
 import SettingsModal from '../settings/SettingsModal'
@@ -14,6 +14,8 @@ export default function Header() {
   const { theme, toggleTheme } = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [switchingProfile, setSwitchingProfile] = useState<string | null>(null)
+  const [profileError, setProfileError] = useState<string | null>(null)
   const { currentProfile, loadProfiles, applyProfile, shortcutsOpen, setShortcutsOpen } = useSettingsStore()
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -32,8 +34,17 @@ export default function Header() {
   }, [])
 
   const handleProfileSwitch = async (profile: string) => {
-    await applyProfile(profile)
-    setProfileMenuOpen(false)
+    setSwitchingProfile(profile)
+    setProfileError(null)
+    try {
+      await applyProfile(profile)
+      setProfileMenuOpen(false)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to switch profile'
+      setProfileError(errorMessage)
+    } finally {
+      setSwitchingProfile(null)
+    }
   }
 
   const currentProfileInfo = currentProfile ? PROFILE_INFO[currentProfile as keyof typeof PROFILE_INFO] : null
@@ -58,28 +69,48 @@ export default function Header() {
             <div className="absolute right-0 top-full mt-1 bg-background border rounded-lg shadow-lg py-1 min-w-[160px] z-50">
               <button
                 onClick={() => handleProfileSwitch('fast')}
-                className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors ${
-                  currentProfile === 'fast' ? 'bg-green-50 text-green-700' : ''
-                }`}
+                disabled={switchingProfile !== null}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                  currentProfile === 'fast' 
+                    ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
+                    : 'hover:bg-accent'
+                } ${switchingProfile !== null ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                <Zap size={14} className="text-green-600" />
+                {switchingProfile === 'fast' ? (
+                  <Loader2 size={14} className="animate-spin text-green-600 dark:text-green-400" />
+                ) : (
+                  <Zap size={14} className="text-green-600 dark:text-green-400" />
+                )}
                 <span>Fast Mode</span>
-                {currentProfile === 'fast' && (
-                  <span className="ml-auto text-xs text-green-600">Active</span>
+                {currentProfile === 'fast' && switchingProfile !== 'fast' && (
+                  <span className="ml-auto text-xs text-green-600 dark:text-green-400">Active</span>
                 )}
               </button>
               <button
                 onClick={() => handleProfileSwitch('deep')}
-                className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors ${
-                  currentProfile === 'deep' ? 'bg-purple-50 text-purple-700' : ''
-                }`}
+                disabled={switchingProfile !== null}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                  currentProfile === 'deep' 
+                    ? 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' 
+                    : 'hover:bg-accent'
+                } ${switchingProfile !== null ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                <Search size={14} className="text-purple-600" />
+                {switchingProfile === 'deep' ? (
+                  <Loader2 size={14} className="animate-spin text-purple-600 dark:text-purple-400" />
+                ) : (
+                  <Search size={14} className="text-purple-600 dark:text-purple-400" />
+                )}
                 <span>Deep Mode</span>
-                {currentProfile === 'deep' && (
-                  <span className="ml-auto text-xs text-purple-600">Active</span>
+                {currentProfile === 'deep' && switchingProfile !== 'deep' && (
+                  <span className="ml-auto text-xs text-purple-600 dark:text-purple-400">Active</span>
                 )}
               </button>
+              {profileError && (
+                <div className="flex items-center gap-1.5 px-3 py-2 text-xs text-red-600 dark:text-red-400 border-t mt-1">
+                  <AlertCircle size={12} />
+                  <span>{profileError}</span>
+                </div>
+              )}
             </div>
           )}
         </div>
