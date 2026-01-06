@@ -654,7 +654,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
             </Tabs.List>
 
             {/* Tab Content */}
-            <div className="flex-1 p-3 sm:p-4 overflow-y-auto max-h-[50vh] sm:max-h-[60vh]">
+            <div className="flex-1 p-3 sm:p-4 overflow-y-auto max-h-[65vh] sm:max-h-[60vh]">
               <Tabs.Content value="general" className="space-y-4">
                 <div className="space-y-1">
                   <label className="block text-sm font-medium text-foreground">Timezone</label>
