@@ -324,6 +324,36 @@ def get_database_info() -> dict:
     }
 
 
+async def check_database_connection() -> dict:
+    """
+    Check database connection status and measure latency.
+
+    Returns:
+        Dictionary with status and latency in milliseconds
+    """
+    import time
+
+    start_time = time.perf_counter()
+    try:
+        engine = get_engine()
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        latency_ms = (time.perf_counter() - start_time) * 1000
+
+        return {
+            "status": "connected",
+            "latency_ms": round(latency_ms, 2),
+            "error": None,
+        }
+    except Exception as e:
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        return {
+            "status": "error",
+            "latency_ms": round(latency_ms, 2),
+            "error": str(e),
+        }
+
+
 def update_config_file(
     db_type: str, sqlite_path: str, postgresql_connection: str, pool_size: int
 ) -> None:
