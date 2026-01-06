@@ -439,6 +439,9 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [profile, setProfile] = useState('custom')
+  const detectedTimezone = typeof Intl !== 'undefined' 
+    ? Intl.DateTimeFormat().resolvedOptions().timeZone 
+    : 'UTC'
 
   const loadConfig = useCallback(async () => {
     setLoading(true)
@@ -513,7 +516,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in z-50" />
-        <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-background rounded-xl w-full max-w-3xl max-h-[85vh] overflow-hidden animate-in zoom-in-95 z-50 sm:max-w-3xl">
+        <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-background rounded-xl w-full max-w-3xl max-h-[85vh] overflow-hidden animate-in zoom-in-95 z-50 sm:max-w-3xl flex flex-col">
           <div className="flex items-center justify-between p-4 border-b">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-primary/10 rounded-lg shrink-0">
@@ -568,11 +571,11 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
             </div>
           </div>
 
-          <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col sm:flex-row">
-            <Tabs.List className="w-full sm:w-48 border-b sm:border-r p-2 space-y-1 bg-muted/30 overflow-y-auto max-h-[30vh] sm:max-h-[60vh] shrink-0">
+          <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col sm:flex-row">
+            <Tabs.List className="flex flex-row sm:flex-col w-full sm:w-48 border-b sm:border-r p-2 gap-2 sm:gap-1 bg-muted/30 overflow-x-auto sm:overflow-x-visible sm:overflow-y-auto shrink-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               <Tabs.Trigger
                 value="general"
-                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'general' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
@@ -581,7 +584,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="database"
-                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'database' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
@@ -590,7 +593,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="master"
-                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'master' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
@@ -599,7 +602,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="planner"
-                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'planner' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
@@ -608,7 +611,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="researcher"
-                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'researcher' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
@@ -617,7 +620,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="tools"
-                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'tools' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
@@ -626,7 +629,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="database-agent"
-                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'database-agent' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
@@ -635,7 +638,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="api-keys"
-                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'api-keys' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
@@ -644,7 +647,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="custom-tools"
-                className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'custom-tools' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
@@ -654,7 +657,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
             </Tabs.List>
 
             {/* Tab Content */}
-            <div className="flex-1 p-3 sm:p-4 overflow-y-auto max-h-[65vh] sm:max-h-[60vh]">
+            <div className="flex-1 p-3 sm:p-4 overflow-y-auto">
               <Tabs.Content value="general" className="space-y-4">
                 <div className="space-y-1">
                   <label className="block text-sm font-medium text-foreground">Timezone</label>
@@ -663,7 +666,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                     onChange={(e) => setConfig({ ...config, general: { ...config.general, timezone: e.target.value } })}
                     className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   >
-                    <option value="auto">Auto-detect</option>
+                    <option value="auto">Auto-detect ({detectedTimezone})</option>
                     <option value="UTC">UTC</option>
                     <option value="America/New_York">Eastern Time</option>
                     <option value="America/Los_Angeles">Pacific Time</option>
