@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db.repositories.chat import ChatRepository
 from app.config.config_manager import get_config, config_manager
-from app.agents.graph import run_agent_workflow_with_streaming
+from app.agents.graph import run_agent_workflow_with_streaming, aggregate_session_costs
 from app.agents.memory import AsyncWorkingMemory
 from app.utils.streaming import (
     event_manager,
@@ -122,6 +122,23 @@ async def run_agent_with_events(
             message_id=message_id,
             final_answer=final_state.get("final_answer", ""),
         )
+
+        # Calculate and store session usage statistics
+        working_memory = final_state.get("working_memory", {})
+        usage_stats = aggregate_session_costs(working_memory)
+
+        # Update assistant message with usage data
+        if usage_stats["total_tokens"] > 0:
+            from app.db.session import get_db
+            from app.db.repositories.chat import ChatRepository
+
+            async for db in get_db():
+                repo = ChatRepository(db)
+                await repo.update_message(
+                    message_id=message_id,
+                    extra_data={"usage": usage_stats},
+                )
+                break
 
         return final_state
 
@@ -552,3 +569,53 @@ async def regenerate_message(
         if assistant_message.created_at
         else None,
     }
+
+
+@router.get("/sessions/{session_id}/usage")
+async def get_session_usage(session_id: str) -> Dict[str, Any]:
+    """
+    Get usage statistics for a session including token counts and costs.
+
+    Returns aggregated usage data from all messages in the session.
+    """
+    async for db in get_db():
+        repo = ChatRepository(db)
+
+        messages = await repo.get_messages(session_id=session_id)
+
+        total_tokens = 0
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_cost = 0.0
+        message_usage = []
+
+        for message in messages:
+            extra_data = message.extra_data or {}
+            usage = extra_data.get("usage", {})
+
+            if usage:
+                tokens = usage.get("tokens", {})
+                total_tokens += tokens.get("total", 0)
+                total_prompt_tokens += tokens.get("prompt", 0)
+                total_completion_tokens += tokens.get("completion", 0)
+                total_cost += usage.get("cost", 0.0)
+
+                message_usage.append({
+                    "message_id": message.id,
+                    "role": message.role,
+                    "tokens": tokens,
+                    "cost": usage.get("cost", 0.0),
+                    "model": usage.get("model", ""),
+                    "provider": usage.get("provider", ""),
+                })
+
+        return {
+            "session_id": session_id,
+            "total_tokens": total_tokens,
+            "total_prompt_tokens": total_prompt_tokens,
+            "total_completion_tokens": total_completion_tokens,
+            "total_cost": round(total_cost, 6),
+            "message_count": len(messages),
+            "messages_with_usage": len(message_usage),
+            "message_usage": message_usage,
+        }

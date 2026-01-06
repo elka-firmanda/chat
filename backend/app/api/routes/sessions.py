@@ -240,17 +240,29 @@ async def update_session(
 
 
 @router.delete("/{session_id}")
-async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_session(
+    session_id: str,
+    permanent: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
     """
-    Delete (archive) a session.
+    Delete a session.
+
+    - Default: Soft delete (archive) the session
+    - permanent=true: Permanently delete all data (messages, working memory, agent steps)
     """
     repo = ChatRepository(db)
-    success = await repo.delete_session(session_id)
 
-    if not success:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    return {"status": "archived", "session_id": session_id}
+    if permanent:
+        success = await repo.hard_delete_session(session_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return Response(status_code=204)
+    else:
+        success = await repo.delete_session(session_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"status": "archived", "session_id": session_id}
 
 
 @router.get("/{session_id}/export")

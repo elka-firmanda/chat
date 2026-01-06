@@ -70,7 +70,7 @@ export function SkeletonMessage() {
 
 export function SkeletonSessionItem() {
   return (
-    <div className="flex items-center gap-2 px-3 py-2">
+    <div className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg">
       <Skeleton className="w-4 h-4 rounded" />
       <div className="flex-1 space-y-1">
         <Skeleton className="h-4 w-3/4" />

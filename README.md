@@ -141,6 +141,22 @@ API keys should be set in `.env` using `${VAR}` syntax:
 }
 ```
 
+## Keyboard Shortcuts
+
+Speed up your workflow with these keyboard shortcuts:
+
+| Shortcut | Action |
+|----------|--------|
+| `⌘ + /` or `Ctrl + /` | Toggle Deep Search |
+| `⌘ + N` or `Ctrl + N** | New chat |
+| `⌘ + ,` or `Ctrl + ,` | Open settings |
+| `?` (then `Shift`) | Show keyboard shortcuts |
+| `Escape` | Go to home |
+
+**Note:** Shortcuts don't work while typing in input fields.
+
+Press `?` to open the shortcuts modal anytime!
+
 ## License
 
 MIT

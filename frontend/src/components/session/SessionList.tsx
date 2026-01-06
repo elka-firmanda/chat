@@ -24,7 +24,7 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export default function SessionList() {
-  const { sessions, activeSessionId, isLoading, searchResults, searchSessions, clearSearch, archiveSession, unarchiveSession, deleteSession } = useSessions()
+  const { sessions, activeSessionId, isLoading, searchResults, searchSessions, clearSearch, archiveSession, unarchiveSession, deleteSession, loadSessions } = useSessions()
   const { setActiveSession } = useChatStore()
   const { loadSession } = useSessions()
   
@@ -117,11 +117,42 @@ export default function SessionList() {
     setDeleteModalOpen(true)
   }
   
+  const handleBulkDeleteArchived = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (archivedSessions.length === 0) return
+    
+    const confirmed = window.confirm(
+      `Delete ${archivedSessions.length} archived sessions permanently? This action cannot be undone.`
+    )
+    
+    if (confirmed) {
+      setIsDeleting(true)
+      try {
+        for (const session of archivedSessions) {
+          await sessionsApi.deletePermanent(session.id)
+        }
+        // Refresh sessions list
+        await loadSessions()
+      } catch (error) {
+        console.error('Failed to delete sessions:', error)
+        alert('Failed to delete some sessions. Please try again.')
+      } finally {
+        setIsDeleting(false)
+      }
+    }
+  }
+  
   const handleConfirmDelete = async () => {
     if (sessionToDelete) {
       setIsDeleting(true)
       try {
-        await deleteSession(sessionToDelete)
+        const session = sessions.find(s => s.id === sessionToDelete)
+        // Use permanent deletion for archived sessions
+        if (session?.archived) {
+          await sessionsApi.deletePermanent(sessionToDelete)
+        } else {
+          await deleteSession(sessionToDelete)
+        }
         setDeleteModalOpen(false)
         setSessionToDelete(null)
       } catch (error) {
@@ -238,8 +269,8 @@ export default function SessionList() {
                             {result.type === 'message' && result.role && (
                               <span className={`px-1 py-0.5 rounded ${
                                 result.role === 'user' 
-                                  ? 'bg-blue-100 dark:bg-blue-900' 
-                                  : 'bg-green-100 dark:bg-green-900'
+                                  ? 'bg-primary/10' 
+                                  : 'bg-green-500/10'
                               }`}>
                                 {result.role}
                               </span>
@@ -340,6 +371,16 @@ export default function SessionList() {
             
             {showArchived && archivedSessions.length > 0 && (
               <div className="mt-2 space-y-1 pl-4">
+                {archivedSessions.length > 1 && (
+                  <button
+                    onClick={handleBulkDeleteArchived}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-destructive/10 transition-colors text-destructive"
+                    disabled={isDeleting}
+                  >
+                    <Trash2 size={14} />
+                    <span>Delete All ({archivedSessions.length})</span>
+                  </button>
+                )}
                 {archivedSessions.map((session) => (
                   <DropdownMenu.Root key={session.id}>
                     <DropdownMenu.Trigger asChild>
@@ -389,9 +430,15 @@ export default function SessionList() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/50 z-50" />
           <Dialog.Content className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-background border rounded-lg shadow-lg p-6 z-50 w-[90vw] max-w-[400px]">
-            <Dialog.Title className="text-lg font-semibold mb-2">Delete Session</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold mb-2">
+              {sessions.find(s => s.id === sessionToDelete)?.archived 
+                ? 'Permanently Delete Session' 
+                : 'Archive Session'}
+            </Dialog.Title>
             <Dialog.Description className="text-muted-foreground mb-4">
-              Are you sure you want to delete this session? This action cannot be undone.
+              {sessions.find(s => s.id === sessionToDelete)?.archived 
+                ? 'This will permanently delete this session and all its messages. This action cannot be undone.'
+                : 'Are you sure you want to archive this session? You can restore it later from the Archives section.'}
             </Dialog.Description>
             <div className="flex justify-end gap-2">
               <button
@@ -403,10 +450,18 @@ export default function SessionList() {
               </button>
               <button
                 onClick={handleConfirmDelete}
-                className="px-4 py-2 text-sm bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition-colors"
+                className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                  sessions.find(s => s.id === sessionToDelete)?.archived
+                    ? 'bg-red-500 text-white hover:bg-red-600'
+                    : 'bg-primary text-primary-foreground hover:opacity-90'
+                }`}
                 disabled={isDeleting}
               >
-                {isDeleting ? 'Deleting...' : 'Delete'}
+                {isDeleting ? 'Deleting...' : (
+                  sessions.find(s => s.id === sessionToDelete)?.archived 
+                    ? 'Permanently Delete' 
+                    : 'Archive'
+                )}
               </button>
             </div>
           </Dialog.Content>

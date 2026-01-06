@@ -51,6 +51,63 @@ from .types import AgentState, AgentType, StepType, StepStatus
 from app.utils.streaming import event_manager
 
 
+def format_usage_data(
+    total_tokens: int,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cost: float,
+    model: str,
+    provider: str,
+) -> Dict[str, Any]:
+    return {
+        "tokens": {
+            "total": total_tokens,
+            "prompt": prompt_tokens,
+            "completion": completion_tokens,
+        },
+        "cost": round(cost, 6),
+        "model": model,
+        "provider": provider,
+    }
+
+
+def aggregate_session_costs(working_memory: Dict[str, Any]) -> Dict[str, Any]:
+    total_tokens = 0
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    total_cost = 0.0
+    agent_breakdown = {}
+
+    # Extract usage from timeline entries
+    timeline = working_memory.get("timeline", [])
+    for entry in timeline:
+        usage = entry.get("usage")
+        if usage:
+            total_tokens += usage.get("tokens", {}).get("total", 0)
+            total_prompt_tokens += usage.get("tokens", {}).get("prompt", 0)
+            total_completion_tokens += usage.get("tokens", {}).get("completion", 0)
+            total_cost += usage.get("cost", 0.0)
+
+            agent = entry.get("agent", "unknown")
+            if agent not in agent_breakdown:
+                agent_breakdown[agent] = {
+                    "tokens": 0,
+                    "cost": 0.0,
+                    "calls": 0,
+                }
+            agent_breakdown[agent]["tokens"] += usage.get("tokens", {}).get("total", 0)
+            agent_breakdown[agent]["cost"] += usage.get("cost", 0.0)
+            agent_breakdown[agent]["calls"] += 1
+
+    return {
+        "total_tokens": total_tokens,
+        "total_prompt_tokens": total_prompt_tokens,
+        "total_completion_tokens": total_completion_tokens,
+        "total_cost": round(total_cost, 6),
+        "agent_breakdown": agent_breakdown,
+    }
+
+
 logger = logging.getLogger(__name__)
 
 _llm_provider: Optional[BaseLLMProvider] = None
@@ -78,17 +135,6 @@ async def synthesize_response(
     subagent_results: Dict[str, Any],
     working_memory: Dict[str, Any],
 ) -> str:
-    """
-    Synthesize a final response using the LLM based on subagent results.
-
-    Args:
-        user_message: The original user message
-        subagent_results: Dictionary containing results from all subagents
-        working_memory: The working memory tree for context
-
-    Returns:
-        Synthesized response string
-    """
     provider = get_llm_provider()
 
     research_info = subagent_results.get("researcher_output", {})
@@ -259,6 +305,7 @@ def create_initial_state(
         intervention_action=None,
         current_error=None,
         final_answer="",
+        usage=None,
         skip_planner=not deep_search_enabled,
         retry_state=None,
     )

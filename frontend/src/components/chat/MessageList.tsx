@@ -1,225 +1,259 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { User, Bot, Loader2, ChevronDown, ChevronRight, Check, Circle, XCircle } from 'lucide-react'
+import { Message } from '../../stores/chatStore'
 import { useChatStore } from '../../stores/chatStore'
-import { useChat } from '../../hooks/useChat'
-import Message from './Message'
-import { ChevronUp, Loader2, List, Layers } from 'lucide-react'
-import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
-import { SkeletonMessage } from '../ui/Skeleton'
+import ChartDisplay from './ChartDisplay'
+import ExportButton from './ExportButton'
 
 interface MessageListProps {
-  onEditMessage?: (messageId: string, newContent: string) => void
+  messages: Message[]
+  isLoading?: boolean
+  currentActivity?: string | null
+  plan?: PlanStep[]
+  streamingContent?: string
 }
 
-export default function MessageList({ onEditMessage }: MessageListProps) {
-  const { activeSessionId, messages, messageTotal } = useChatStore()
-  const sessionMessages = activeSessionId ? messages[activeSessionId] || [] : []
-  const totalMessages = activeSessionId ? messageTotal[activeSessionId] || 0 : 0
+interface PlanStep {
+  id: string
+  step_number: number
+  agent?: string
+  description: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  result?: string
+  logs?: string
+}
 
-  const { loadMessages, loadMoreMessages, isLoading } = useChat()
-  const containerRef = useRef<HTMLDivElement>(null)
-  const scrollHeightRef = useRef<number>(0)
-  const hasLoadedInitial = useRef(false)
-  const virtuosoRef = useRef<VirtuosoHandle>(null)
+interface ExtractedChart {
+  filename: string
+  data: string
+}
 
-  const canLoadMore = sessionMessages.length < totalMessages
+function extractChartsFromContent(content: string): { text: string; charts: ExtractedChart[] } {
+  const chartRegex = /<!-- CHARTS:(\[[\s\S]*?\]):CHARTS -->/g
+  const match = chartRegex.exec(content)
 
-  const [paginationMode, setPaginationMode] = useState<'button' | 'infinite' | 'virtual'>('button')
-
-  useEffect(() => {
-    if (activeSessionId && !hasLoadedInitial.current) {
-      hasLoadedInitial.current = true
-      loadMessages(activeSessionId, 30, 0)
-    }
-  }, [activeSessionId, loadMessages])
-
-  useEffect(() => {
-    if (!activeSessionId) {
-      hasLoadedInitial.current = false
-    }
-  }, [activeSessionId])
-
-  const handleLoadMore = useCallback(async () => {
-    if (!activeSessionId || isLoading || !canLoadMore) return
-
-    const container = containerRef.current
-    if (!container) return
-
-    scrollHeightRef.current = container.scrollHeight
-    await loadMoreMessages()
-  }, [activeSessionId, isLoading, canLoadMore, loadMoreMessages])
-
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    const handleScroll = () => {
-      if (container.scrollTop <= 50 && canLoadMore && !isLoading) {
-        handleLoadMore()
-      }
-    }
-
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
-  }, [canLoadMore, isLoading, handleLoadMore])
-
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    const newScrollHeight = container.scrollHeight
-    const oldScrollHeight = scrollHeightRef.current
-
-    if (oldScrollHeight > 0 && newScrollHeight > oldScrollHeight) {
-      const scrollDifference = newScrollHeight - oldScrollHeight
-      container.scrollTop = scrollDifference
-    }
-  }, [sessionMessages])
-
-  const handleStartReached = useCallback(async () => {
-    if (!activeSessionId || isLoading || !canLoadMore) return
-    await loadMoreMessages()
-  }, [activeSessionId, isLoading, canLoadMore, loadMoreMessages])
-
-  const scrollToBottom = useCallback(() => {
-    if (virtuosoRef.current) {
-      virtuosoRef.current.scrollToIndex({
-        index: sessionMessages.length - 1,
-        align: 'end',
-        behavior: 'smooth'
-      })
-    }
-  }, [sessionMessages.length])
-
-  if (sessionMessages.length === 0 && !isLoading) {
-    return (
-      <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
-        <div className="text-center text-muted-foreground">
-          <p className="text-base sm:text-lg mb-2">Start a conversation</p>
-          <p className="text-xs sm:text-sm">Send a message to begin chatting</p>
-        </div>
-      </div>
-    )
+  if (!match) {
+    return { text: content, charts: [] }
   }
 
-  const renderMessage = (index: number, message: typeof sessionMessages[0]) => {
-    const isFirst = index === 0
-    const isLast = index === sessionMessages.length - 1
-    return (
-      <div className={isFirst ? 'pt-4' : ''}>
-        <Message key={message.id} message={message} onEdit={onEditMessage} />
-        {isLast && <div className="pb-4" />}
-      </div>
-    )
+  try {
+    const charts = JSON.parse(match[1]) as ExtractedChart[]
+    const text = content.replace(chartRegex, '').trim()
+    return { text, charts }
+  } catch {
+    return { text: content, charts: [] }
   }
+}
+
+function formatTime(timestamp: string): string {
+  const date = new Date(timestamp)
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+export default function MessageList({
+  messages,
+  isLoading,
+  currentActivity,
+  plan,
+  streamingContent
+}: MessageListProps) {
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const [planExpanded, setPlanExpanded] = useState(true)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isLoading, currentActivity, plan, streamingContent])
+
+  if (messages.length === 0) {
+    return null
+  }
+
+  const hasPlan = plan && plan.length > 0
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="text-xs text-muted-foreground">
-          {totalMessages > 0 && (
-            <span>{sessionMessages.length} of {totalMessages} messages</span>
-          )}
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+        {messages.map((message) => (
+          <MessageBubble key={message.id} message={message} />
+        ))}
+
+        {isLoading && (
+          <div className="flex items-start gap-4">
+            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <Bot className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="font-medium">Assistant</span>
+              </div>
+
+              {streamingContent ? (
+                <div className="bg-secondary rounded-2xl px-4 py-3 inline-block max-w-full text-left">
+                  <div className="markdown-content prose prose-sm dark:prose-invert max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-secondary rounded-2xl px-4 py-3 inline-block">
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                    <span className="text-sm text-muted-foreground">
+                      {currentActivity || 'Thinking...'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {hasPlan && !streamingContent && (
+                <div className="mt-3">
+                  <button
+                    onClick={() => setPlanExpanded(!planExpanded)}
+                    className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {planExpanded ? (
+                      <ChevronDown className="w-4 h-4" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4" />
+                    )}
+                    <span>
+                      Execution Plan ({plan.filter((s) => s.status === 'completed').length}/{plan.length} steps)
+                    </span>
+                  </button>
+
+                  {planExpanded && (
+                    <div className="mt-2 ml-1 space-y-2 border-l-2 border-border pl-4">
+                      {plan.map((step, index) => (
+                        <StepItem key={step.id} step={step} index={index} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  )
+}
+
+function StepItem({ step, index }: { step: PlanStep; index: number }) {
+  const getStatusIcon = () => {
+    switch (step.status) {
+      case 'completed':
+        return (
+          <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
+            <Check className="w-3 h-3 text-white" />
+          </div>
+        )
+      case 'running':
+        return (
+          <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
+            <Loader2 className="w-3 h-3 text-white animate-spin" />
+          </div>
+        )
+      case 'failed':
+        return (
+          <div className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center">
+            <XCircle className="w-3 h-3 text-white" />
+          </div>
+        )
+      default:
+        return (
+          <div className="w-5 h-5 rounded-full border-2 border-muted-foreground/30 flex items-center justify-center">
+            <Circle className="w-2 h-2 text-muted-foreground/30" />
+          </div>
+        )
+    }
+  }
+
+  const agentColors: Record<string, string> = {
+    researcher: 'text-blue-600 dark:text-blue-400',
+    tools: 'text-purple-600 dark:text-purple-400',
+    master: 'text-green-600 dark:text-green-400',
+    database: 'text-orange-600 dark:text-orange-400',
+    python: 'text-yellow-600 dark:text-yellow-400'
+  }
+
+  const agent = step.agent || 'unknown'
+  const agentColor = agentColors[agent] || 'text-gray-600'
+
+  return (
+    <div className={`flex items-start gap-2 transition-opacity ${step.status === 'pending' ? 'opacity-50' : ''}`}>
+      <div className="shrink-0 mt-0.5">{getStatusIcon()}</div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-medium ${step.status === 'completed' ? 'line-through text-muted-foreground' : ''}`}>
+            Step {index + 1}
+          </span>
+          <span className={`text-xs ${agentColor}`}>{agent}</span>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setPaginationMode('button')}
-            className={`p-1.5 rounded transition-colors ${
-              paginationMode === 'button'
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-            title="Button pagination"
-          >
-            <List size={14} />
-          </button>
-          <button
-            onClick={() => setPaginationMode('infinite')}
-            className={`p-1.5 rounded transition-colors ${
-              paginationMode === 'infinite'
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-            title="Infinite scroll"
-          >
-            <Layers size={14} />
-          </button>
-          <button
-            onClick={() => setPaginationMode('virtual')}
-            className={`p-1.5 rounded transition-colors ${
-              paginationMode === 'virtual'
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-            title="Virtual scrolling"
-          >
-            <Layers size={14} />
-          </button>
-        </div>
+        <p className={`text-xs mt-0.5 leading-relaxed ${step.status === 'completed' ? 'text-muted-foreground' : 'text-foreground'}`}>
+          {step.description}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function MessageBubble({ message }: { message: Message }) {
+  const isUser = message.role === 'user'
+  const { text: displayContent, charts } = isUser
+    ? { text: message.content, charts: [] }
+    : extractChartsFromContent(message.content)
+
+  const sessionId = useChatStore((state) => state.activeSessionId)
+  const hasComparisonResults =
+    !isUser && Boolean((message.metadata?.agent_results as Record<string, unknown> | undefined)?.comparison)
+
+  return (
+    <div className={`flex items-start gap-4 ${isUser ? 'flex-row-reverse' : ''}`}>
+      <div
+        className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+          isUser ? 'bg-secondary' : 'bg-primary/10'
+        }`}
+      >
+        {isUser ? <User className="w-5 h-5 text-foreground" /> : <Bot className="w-5 h-5 text-primary" />}
       </div>
 
-      {paginationMode === 'virtual' ? (
-        <div className="flex-1 overflow-hidden" ref={containerRef}>
-          <Virtuoso
-            ref={virtuosoRef}
-            data={sessionMessages}
-            itemContent={(index, message) => renderMessage(index, message)}
-            startReached={handleStartReached}
-            atTopStateChange={(atTop) => {
-              if (atTop && canLoadMore && !isLoading) {
-                handleStartReached()
-              }
-            }}
-            alignToBottom
-            className="h-full"
-          />
+      <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
+        <div className={`flex items-center gap-2 mb-2 ${isUser ? 'justify-end' : ''}`}>
+          <span className="font-medium">{isUser ? 'You' : 'Assistant'}</span>
+          <span className="text-xs text-muted-foreground">{formatTime(message.created_at)}</span>
         </div>
-      ) : (
+
         <div
-          ref={containerRef}
-          className="flex-1 overflow-auto p-3 sm:p-4 space-y-3 sm:space-y-4"
+          className={`rounded-2xl px-4 py-3 inline-block max-w-full text-left ${
+            isUser ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'
+          }`}
         >
-          {(paginationMode === 'infinite' || canLoadMore) && (
-            <div className="flex justify-center pb-2">
-              <button
-                onClick={handleLoadMore}
-                disabled={isLoading}
-                className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-              >
-                {isLoading ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <ChevronUp size={16} />
-                )}
-                {isLoading ? 'Loading...' : `Show more (${totalMessages - sessionMessages.length} remaining)`}
-              </button>
-            </div>
-          )}
-
-          {sessionMessages.map((message) => (
-            <Message key={message.id} message={message} />
-          ))}
-
-          {sessionMessages.length === 0 && isLoading && (
-            <div className="space-y-4">
-              <SkeletonMessage />
-              <SkeletonMessage />
-              <SkeletonMessage />
+          {isUser ? (
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          ) : (
+            <div className="markdown-content prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
             </div>
           )}
         </div>
-      )}
 
-      {sessionMessages.length > 10 && paginationMode !== 'virtual' && (
-        <div className="absolute bottom-20 right-4">
-          <button
-            onClick={scrollToBottom}
-            className="p-2 rounded-full bg-accent text-accent-foreground shadow-lg hover:opacity-90 transition-opacity"
-            title="Scroll to bottom"
-          >
-            <ChevronUp size={16} className="transform rotate-180" />
-          </button>
-        </div>
-      )}
+        {charts.length > 0 && <ChartDisplay charts={charts} />}
+
+        {message.metadata?.deep_search === true && (
+          <div className="mt-2">
+            <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">Deep Search</span>
+          </div>
+        )}
+
+        {hasComparisonResults && sessionId && (
+          <div className="mt-3">
+            <ExportButton sessionId={sessionId} />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

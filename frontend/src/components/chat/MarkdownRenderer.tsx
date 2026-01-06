@@ -78,7 +78,7 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
                   </button>
                 </div>
                 <pre className="p-3 overflow-x-auto">
-                  <code className={className} {...props}>
+                  <code className={`${className} font-mono`} {...props}>
                     {children}
                   </code>
                 </pre>

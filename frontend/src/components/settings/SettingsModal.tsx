@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
-import { X, Check, AlertCircle, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon, Plus, Trash2, Edit, Wrench, Key as KeyIcon } from 'lucide-react'
-import { toolsApi, configApi, type CustomTool } from '../../services/api'
+import { X, Check, AlertCircle, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon, Plus, Trash2, Edit, Wrench, Key as KeyIcon, RefreshCw } from 'lucide-react'
+import { toolsApi, configApi, type CustomTool, type ModelOption } from '../../services/api'
 import { useSettingsStore } from '../../stores/settingsStore'
 
 // Provider options
@@ -15,16 +15,32 @@ const PROVIDERS = [
 // Model options per provider
 const MODELS: Record<string, { value: string; label: string }[]> = {
   anthropic: [
+    { value: 'claude-sonnet-4-20250514', label: 'Claude 4 Sonnet (Latest)' },
+    { value: 'claude-opus-4-20250514', label: 'Claude 4 Opus' },
     { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
+    { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
+    { value: 'claude-3-5-sonnet-20240620', label: 'Claude 3.5 Sonnet (June 2024)' },
     { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
+    { value: 'claude-3-sonnet-20240229', label: 'Claude 3 Sonnet' },
     { value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku' },
   ],
   openai: [
+    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'gpt-4o-2024-11-20', label: 'GPT-4o (2024-11-20)' },
+    { value: 'gpt-4o-2024-08-06', label: 'GPT-4o (2024-08-06)' },
+    { value: 'gpt-4o-2024-05-13', label: 'GPT-4o (2024-05-13)' },
     { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+    { value: 'gpt-4-turbo-2024-04-09', label: 'GPT-4 Turbo (2024-04-09)' },
     { value: 'gpt-4', label: 'GPT-4' },
     { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
+    { value: 'gpt-3.5-turbo-0125', label: 'GPT-3.5 Turbo (0125)' },
+    { value: 'o1', label: 'O1' },
+    { value: 'o1-2024-12-17', label: 'O1 (2024-12-17)' },
+    { value: 'o3-mini', label: 'O3 Mini' },
   ],
   openrouter: [
+    { value: 'anthropic/claude-sonnet-4-20250514', label: 'Anthropic Claude Sonnet 4' },
+    { value: 'anthropic/claude-opus-4-20250514', label: 'Anthropic Claude Opus 4' },
     { value: 'anthropic/claude-3.5-sonnet', label: 'Anthropic Claude 3.5 Sonnet' },
     { value: 'openai/gpt-4-turbo', label: 'OpenAI GPT-4 Turbo' },
     { value: 'google/gemini-pro', label: 'Google Gemini Pro' },
@@ -201,7 +217,9 @@ function ApiKeyInput({
     setValidationResult({ valid: null, message: '' })
 
     try {
-      const response = await fetch(`/api/v1/config/validate-api-key?provider=${provider}&api_key=${encodeURIComponent(value)}`)
+      const response = await fetch(`/api/v1/config/validate-api-key?provider=${provider}&api_key=${encodeURIComponent(value)}`, {
+        method: 'POST',
+      })
       
       if (response.ok) {
         const data = await response.json()
@@ -320,7 +338,39 @@ function AgentSettingsTab({
   showTools?: boolean
   showSchema?: boolean
 }) {
-  const availableModels = MODELS[config.provider] || MODELS.anthropic
+  const [models, setModels] = useState<ModelOption[]>(MODELS[config.provider] || MODELS.anthropic)
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [modelError, setModelError] = useState<string | null>(null)
+
+  const fetchModels = async (provider: string) => {
+    setLoadingModels(true)
+    setModelError(null)
+    try {
+      const response = await configApi.getModels(provider)
+      if (response.data.models.length > 0) {
+        setModels(response.data.models)
+        if (!response.data.models.find(m => m.value === config.model)) {
+          onChange({ ...config, model: response.data.models[0].value })
+        }
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 
+        'Failed to fetch models'
+      setModelError(errorMessage)
+      setModels(MODELS[provider] || MODELS.anthropic)
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchModels(config.provider)
+  }, [config.provider])
+
+  const handleRefreshModels = () => {
+    fetchModels(config.provider)
+  }
 
   return (
     <div className="space-y-4">
@@ -344,16 +394,30 @@ function AgentSettingsTab({
         </div>
 
         <div className="space-y-1">
-          <label className="block text-sm font-medium text-foreground">Model</label>
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-medium text-foreground">Model</label>
+            <button
+              type="button"
+              onClick={handleRefreshModels}
+              disabled={loadingModels}
+              className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors disabled:opacity-50"
+              title="Refresh models from provider"
+            >
+              <RefreshCw size={14} className={loadingModels ? 'animate-spin' : ''} />
+            </button>
+          </div>
           <select
             value={config.model}
             onChange={(e) => onChange({ ...config, model: e.target.value })}
             className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
           >
-            {availableModels.map((m) => (
+            {models.map((m) => (
               <option key={m.value} value={m.value}>{m.label}</option>
             ))}
           </select>
+          {modelError && (
+            <p className="text-xs text-red-600">{modelError}</p>
+          )}
         </div>
 
         <div className="space-y-1">
@@ -572,87 +636,96 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
           </div>
 
           <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col sm:flex-row">
-            <Tabs.List className="flex flex-row sm:flex-col w-full sm:w-48 border-b sm:border-r p-2 gap-2 sm:gap-1 bg-muted/30 overflow-x-auto sm:overflow-x-visible sm:overflow-y-auto shrink-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <Tabs.List className="flex flex-row sm:flex-col w-full sm:w-48 border-b sm:border-r sm:border-b-0 p-2 gap-1 bg-muted/30 overflow-x-auto sm:overflow-x-visible sm:overflow-y-auto shrink-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] justify-start sm:justify-start">
               <Tabs.Trigger
                 value="general"
-                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                title="General"
+                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'general' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                <Globe size={16} />
-                <span className="truncate">General</span>
+                <Globe size={18} className="shrink-0" />
+                <span className="hidden sm:inline">General</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="database"
-                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                title="Database"
+                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'database' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                <Database size={16} />
-                <span className="truncate">Database</span>
+                <Database size={18} className="shrink-0" />
+                <span className="hidden sm:inline">Database</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="master"
-                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                title="Master Agent"
+                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'master' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                <Cpu size={16} />
-                <span className="truncate">Master</span>
+                <Cpu size={18} className="shrink-0" />
+                <span className="hidden sm:inline">Master</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="planner"
-                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                title="Planner Agent"
+                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'planner' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                <SettingsIcon size={16} />
-                <span className="truncate">Planner</span>
+                <SettingsIcon size={18} className="shrink-0" />
+                <span className="hidden sm:inline">Planner</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="researcher"
-                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                title="Researcher Agent"
+                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'researcher' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                <Search size={16} />
-                <span className="truncate">Researcher</span>
+                <Search size={18} className="shrink-0" />
+                <span className="hidden sm:inline">Researcher</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="tools"
-                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                title="Tools Agent"
+                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'tools' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                <Hammer size={16} />
-                <span className="truncate">Tools</span>
+                <Hammer size={18} className="shrink-0" />
+                <span className="hidden sm:inline">Tools</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="database-agent"
-                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                title="Database Agent"
+                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'database-agent' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                <Server size={16} />
-                <span className="truncate">DB Agent</span>
+                <Server size={18} className="shrink-0" />
+                <span className="hidden sm:inline">DB Agent</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="api-keys"
-                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                title="API Keys"
+                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'api-keys' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                <KeyIcon size={16} />
-                <span className="truncate">API Keys</span>
+                <KeyIcon size={18} className="shrink-0" />
+                <span className="hidden sm:inline">API Keys</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="custom-tools"
-                className={`w-auto sm:w-full whitespace-nowrap flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg text-sm transition-colors touch-manipulation ${
+                title="Custom Tools"
+                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
                   activeTab === 'custom-tools' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                <Wrench size={16} />
-                <span className="truncate">Custom</span>
+                <Wrench size={18} className="shrink-0" />
+                <span className="hidden sm:inline">Custom</span>
               </Tabs.Trigger>
             </Tabs.List>
 
@@ -785,6 +858,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                   icon={Cpu}
                   config={config.agents.master}
                   onChange={(c) => setConfig({ ...config, agents: { ...config.agents, master: c } })}
+                  
                   showTemperature
                 />
               </Tabs.Content>
@@ -795,6 +869,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                   icon={SettingsIcon}
                   config={config.agents.planner}
                   onChange={(c) => setConfig({ ...config, agents: { ...config.agents, planner: c } })}
+                  
                 />
               </Tabs.Content>
 
@@ -804,6 +879,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                   icon={Search}
                   config={config.agents.researcher}
                   onChange={(c) => setConfig({ ...config, agents: { ...config.agents, researcher: c } })}
+                  
                 />
                 <div className="mt-4 space-y-4 pt-4 border-t">
                   <ApiKeyInput
@@ -842,6 +918,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                   icon={Hammer}
                   config={config.agents.tools}
                   onChange={(c) => setConfig({ ...config, agents: { ...config.agents, tools: c } })}
+                  
                   showTools
                 />
               </Tabs.Content>
@@ -852,6 +929,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                   icon={Server}
                   config={config.agents.database}
                   onChange={(c) => setConfig({ ...config, agents: { ...config.agents, database: c } })}
+                  
                   showSchema
                 />
               </Tabs.Content>

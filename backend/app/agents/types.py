@@ -63,5 +63,6 @@ class AgentState(TypedDict):
     intervention_action: Optional[str]
     current_error: Optional[Dict[str, Any]]
     final_answer: str
+    usage: Optional[Dict[str, Any]]
     skip_planner: bool
     retry_state: Optional[Dict[str, Any]]

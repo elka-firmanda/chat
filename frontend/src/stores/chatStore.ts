@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { sessionsApi, authApi } from '../services/api'
 
 export interface Message {
   id: string
@@ -64,8 +65,14 @@ export interface AgentStep {
 }
 
 interface ChatState {
+  // Auth state
+  chatAuthRequired: boolean | null
+  isChatAuthenticated: boolean
+  
   sessions: ChatSession[]
+  archivedSessions: ChatSession[]
   activeSessionId: string | null
+  sidebarOpen: boolean
   messages: Record<string, Message[]>
   messageTotal: Record<string, number>
   agentSteps: Record<string, AgentStep[]>
@@ -73,10 +80,23 @@ interface ChatState {
   activeNodeId: string | null
   isDeepSearchEnabled: boolean
   isLoading: boolean
+  
+  // Auth methods
+  checkChatAuth: () => Promise<void>
+  chatLogin: (password: string) => Promise<boolean>
+  
   setSessions: (sessions: ChatSession[]) => void
+  setArchivedSessions: (sessions: ChatSession[]) => void
   addSession: (session: ChatSession) => void
   updateSession: (sessionId: string, updates: Partial<ChatSession>) => void
+  removeSession: (sessionId: string) => void
   setActiveSession: (sessionId: string | null) => void
+  deleteSession: (sessionId: string) => Promise<void>
+  renameSession: (sessionId: string, title: string) => Promise<void>
+  archiveSession: (sessionId: string) => Promise<void>
+  unarchiveSession: (sessionId: string) => Promise<void>
+  toggleSidebar: () => void
+  setSidebarOpen: (open: boolean) => void
   addMessage: (sessionId: string, message: Message) => void
   updateMessage: (sessionId: string, messageId: string, updates: Partial<Message>) => void
   setMessages: (sessionId: string, messages: Message[]) => void
@@ -96,8 +116,14 @@ interface ChatState {
 export const useChatStore = create<ChatState>()(
   persist(
     (set) => ({
+      // Auth state
+      chatAuthRequired: null,
+      isChatAuthenticated: false,
+      
       sessions: [],
+      archivedSessions: [],
       activeSessionId: null,
+      sidebarOpen: true,
       messages: {},
       messageTotal: {},
       agentSteps: {},
@@ -106,15 +132,66 @@ export const useChatStore = create<ChatState>()(
       isDeepSearchEnabled: false,
       isLoading: false,
       setSessions: (sessions) => set({ sessions }),
+      setArchivedSessions: (sessions) => set({ archivedSessions: sessions }),
       addSession: (session) => set((state) => ({
         sessions: [session, ...state.sessions]
       })),
       updateSession: (sessionId, updates) => set((state) => ({
         sessions: state.sessions.map(s =>
           s.id === sessionId ? { ...s, ...updates } : s
+        ),
+        archivedSessions: state.archivedSessions.map(s =>
+          s.id === sessionId ? { ...s, ...updates } : s
         )
       })),
+      removeSession: (sessionId) => set((state) => ({
+        sessions: state.sessions.filter(s => s.id !== sessionId),
+        archivedSessions: state.archivedSessions.filter(s => s.id !== sessionId)
+      })),
       setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+      deleteSession: async (sessionId) => {
+        await sessionsApi.delete(sessionId)
+        set((state) => ({
+          sessions: state.sessions.filter(s => s.id !== sessionId),
+          archivedSessions: state.archivedSessions.filter(s => s.id !== sessionId),
+          activeSessionId: state.activeSessionId === sessionId ? null : state.activeSessionId
+        }))
+      },
+      renameSession: async (sessionId, title) => {
+        await sessionsApi.update(sessionId, { title })
+        set((state) => ({
+          sessions: state.sessions.map(s =>
+            s.id === sessionId ? { ...s, title } : s
+          ),
+          archivedSessions: state.archivedSessions.map(s =>
+            s.id === sessionId ? { ...s, title } : s
+          )
+        }))
+      },
+      archiveSession: async (sessionId) => {
+        await sessionsApi.archive(sessionId)
+        set((state) => {
+          const session = state.sessions.find(s => s.id === sessionId)
+          if (!session) return state
+          return {
+            sessions: state.sessions.filter(s => s.id !== sessionId),
+            archivedSessions: [...state.archivedSessions, { ...session, archived: true }]
+          }
+        })
+      },
+      unarchiveSession: async (sessionId) => {
+        await sessionsApi.unarchive(sessionId)
+        set((state) => {
+          const session = state.archivedSessions.find(s => s.id === sessionId)
+          if (!session) return state
+          return {
+            archivedSessions: state.archivedSessions.filter(s => s.id !== sessionId),
+            sessions: [{ ...session, archived: false }, ...state.sessions]
+          }
+        })
+      },
+      toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+      setSidebarOpen: (open) => set({ sidebarOpen: open }),
       addMessage: (sessionId, message) => set((state) => {
         const sessionMessages = state.messages[sessionId] || []
         return {
@@ -241,40 +318,61 @@ export const useChatStore = create<ChatState>()(
       setLoading: (loading) => set({ isLoading: loading }),
       addThought: (sessionId, agent, content) => set((state) => {
         const sessionMessages = state.messages[sessionId] || []
-        if (sessionMessages.length === 0) return state
-
         const lastMessage = sessionMessages[sessionMessages.length - 1]
-        if (lastMessage.role !== 'assistant') return state
-
-        const thoughts = lastMessage.metadata?.thoughts || []
-        const newThought = { agent, content }
-        const updatedThoughts = [...thoughts, newThought]
-        const thinkingContent = updatedThoughts
-          .map(t => `[${t.agent}] ${t.content}`)
-          .join('\n\n')
-
-        const updatedLastMessage = {
-          ...lastMessage,
-          metadata: {
-            ...lastMessage.metadata,
-            thoughts: updatedThoughts,
-            thinking_content: thinkingContent
+        
+        if (lastMessage && lastMessage.role === 'assistant') {
+          const updatedLastMessage = {
+            ...lastMessage,
+            metadata: {
+              ...lastMessage.metadata,
+              thoughts: [
+                ...(lastMessage.metadata?.thoughts || []),
+                { agent, content }
+              ]
+            }
+          }
+          return {
+            messages: {
+              ...state.messages,
+              [sessionId]: [...sessionMessages.slice(0, -1), updatedLastMessage]
+            }
           }
         }
-
-        return {
-          messages: {
-            ...state.messages,
-            [sessionId]: [...sessionMessages.slice(0, -1), updatedLastMessage]
-          }
+        return state
+      }),
+      
+      // Auth methods
+      checkChatAuth: async () => {
+        try {
+          const { data } = await authApi.status()
+          set({ 
+            chatAuthRequired: data.auth_required, 
+            isChatAuthenticated: !data.auth_required 
+          })
+        } catch {
+          // If endpoint doesn't exist or fails, assume auth not required
+          set({ chatAuthRequired: false, isChatAuthenticated: true })
         }
-      })
+      },
+      
+      chatLogin: async (password: string) => {
+        try {
+          const { data } = await authApi.login(password)
+          const authenticated = data.authenticated
+          set({ isChatAuthenticated: authenticated })
+          return authenticated
+        } catch {
+          return false
+        }
+      }
     }),
     {
       name: 'chat-storage',
       partialize: (state) => ({
         sessions: state.sessions,
+        archivedSessions: state.archivedSessions,
         activeSessionId: state.activeSessionId,
+        sidebarOpen: state.sidebarOpen,
         isDeepSearchEnabled: state.isDeepSearchEnabled
       })
     }

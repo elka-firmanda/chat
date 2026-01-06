@@ -1,58 +1,62 @@
-import { useState, useRef, useEffect, KeyboardEvent } from 'react'
-import { Send, Zap } from 'lucide-react'
-import { useChatStore } from '../../stores/chatStore'
-import { useChat } from '../../hooks/useChat'
+import { useState, useRef, useEffect, KeyboardEvent } from "react";
+import { Send, Zap } from "lucide-react";
+import { useChatStore } from "../../stores/chatStore";
+import { useChat } from "../../hooks/useChat";
 
 interface InputBoxProps {
-  initialValue?: string
-  onSubmit?: (content: string) => void
-  onCancel?: () => void
+  initialValue?: string;
+  onSubmit?: (content: string) => void;
+  onCancel?: () => void;
 }
 
 function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(' ')
+  return classes.filter(Boolean).join(" ");
 }
 
-export default function InputBox({ initialValue = '', onSubmit, onCancel }: InputBoxProps) {
-  const [input, setInput] = useState(initialValue)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const isEditing = !!onSubmit
-  const { isDeepSearchEnabled, toggleDeepSearch, isLoading } = useChatStore()
-  const { sendMessage } = useChat()
-  const charCount = input.length
-  const maxChars = 10000
+export default function InputBox({
+  initialValue = "",
+  onSubmit,
+  onCancel,
+}: InputBoxProps) {
+  const [input, setInput] = useState(initialValue);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isEditing = !!onSubmit;
+  const { isDeepSearchEnabled, toggleDeepSearch, isLoading } = useChatStore();
+  const { sendMessage } = useChat();
+  const charCount = input.length;
+  const maxChars = 10000;
 
   // Auto-resize textarea
   useEffect(() => {
-    const textarea = textareaRef.current
+    const textarea = textareaRef.current;
     if (textarea) {
-      textarea.style.height = 'auto'
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
     }
-  }, [input])
+  }, [input]);
 
   const handleSubmit = () => {
     if (input.trim() && !isLoading) {
       if (isEditing && onSubmit) {
-        onSubmit(input.trim())
+        onSubmit(input.trim());
       } else {
-        sendMessage(input.trim(), isDeepSearchEnabled)
+        sendMessage(input.trim(), isDeepSearchEnabled);
       }
-      setInput('')
+      setInput("");
     }
-  }
+  };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
     }
-  }
+  };
 
   return (
-    <div className="border-t border-border bg-background pb-2">
+    <div className="bg-background pb-2">
       <div className="max-w-3xl mx-auto px-4">
-          <div className="flex items-end gap-3 bg-secondary border border-border rounded-2xl px-4 py-2">
+        <div className="flex items-end gap-3 bg-secondary border border-border rounded-2xl px-4 py-2">
           <textarea
             ref={textareaRef}
             value={input}
@@ -83,7 +87,9 @@ export default function InputBox({ initialValue = '', onSubmit, onCancel }: Inpu
               )}
               title="Enable Deep Search for comprehensive research"
             >
-              <Zap className={cn("w-4 h-4", isDeepSearchEnabled && "fill-current")} />
+              <Zap
+                className={cn("w-4 h-4", isDeepSearchEnabled && "fill-current")}
+              />
               <span className="hidden sm:inline">Deep Search</span>
             </button>
 
@@ -121,17 +127,19 @@ export default function InputBox({ initialValue = '', onSubmit, onCancel }: Inpu
               charCount >= maxChars
                 ? "text-red-500"
                 : charCount >= maxChars * 0.9
-                  ? "text-yellow-500"
-                  : charCount >= maxChars * 0.8
-                    ? "text-yellow-500/80"
-                    : "text-foreground"
+                ? "text-yellow-500"
+                : charCount >= maxChars * 0.8
+                ? "text-yellow-500/80"
+                : "text-foreground"
             )}
           >
             {charCount.toLocaleString()}
           </span>
-          <span className="text-xs text-muted-foreground">/ {maxChars.toLocaleString()}</span>
+          <span className="text-xs text-muted-foreground">
+            / {maxChars.toLocaleString()}
+          </span>
         </div>
       </div>
     </div>
-  )
+  );
 }

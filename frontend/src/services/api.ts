@@ -92,6 +92,12 @@ export const sessionsApi = {
   delete: (sessionId: string) =>
     api.delete(`/sessions/${sessionId}`),
   
+  deletePermanent: (sessionId: string) =>
+    api.delete(`/sessions/${sessionId}`, { params: { permanent: true } }),
+  
+  deleteMultiple: (sessionIds: string[], permanent = false) =>
+    api.post('/sessions/delete', { session_ids: sessionIds, permanent }),
+  
   search: (query: string, limit = 20, searchType: 'all' | 'sessions' | 'messages' = 'all') =>
     api.get<SearchResponse>('/sessions/search', { params: { q: query, limit, search_type: searchType } }),
 
@@ -140,6 +146,16 @@ export const chatApi = {
     api.post<{ message_id: string; session_id: string; created_at: string }>(`/chat/regenerate/${messageId}`)
 }
 
+export interface ModelOption {
+  value: string
+  label: string
+}
+
+export interface ModelsResponse {
+  provider: string
+  models: ModelOption[]
+}
+
 // Config APIs
 export const configApi = {
   get: () => api.get('/config'),
@@ -159,7 +175,24 @@ export const configApi = {
     api.post(`/config/profiles/${profileName}`),
   
   validate: () =>
-    api.get<{ valid: boolean; message?: string }>('/config/validate')
+    api.get<{ valid: boolean; message?: string }>('/config/validate'),
+  
+  getModels: (provider: string, apiKey?: string) =>
+    api.get<ModelsResponse>('/config/models', {
+      params: { provider, ...(apiKey && { api_key: apiKey }) }
+    })
+}
+
+// Auth APIs
+export const authApi = {
+  status: () =>
+    api.get<{ auth_required: boolean }>('/auth/chat/status'),
+  
+  login: (password: string) =>
+    api.post<{ authenticated: boolean }>('/auth/chat/login', { password }),
+  
+  logout: () =>
+    api.post('/auth/chat/logout')
 }
 
 // Health APIs
@@ -216,6 +249,15 @@ export const toolsApi = {
   
   getTemplate: () =>
     api.get<{ template: string }>('/tools/template')
+}
+
+// WebSocket helper
+export const wsApi = {
+  getConnectionUrl: (sessionId: string) => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.host
+    return `${protocol}//${host}/api/v1/ws/${sessionId}`
+  }
 }
 
 export default api

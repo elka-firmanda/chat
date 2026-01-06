@@ -235,10 +235,12 @@ export default function ChatContainer() {
   // Show empty state when no messages
   if (sessionMessages.length === 0) {
     return (
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col h-full">
         <ToastContainer />
         <ExampleCards onSelect={handleSelectExample} />
-        <InputBox />
+        <div className="mt-auto">
+          <InputBox />
+        </div>
       </div>
     )
   }

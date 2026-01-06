@@ -16,7 +16,7 @@ export default function ToastContainer() {
               ? 'bg-green-500 text-white'
               : toast.type === 'error'
               ? 'bg-red-500 text-white'
-              : 'bg-blue-500 text-white'
+              : 'bg-primary text-primary-foreground'
           }`}
         >
           {toast.type === 'success' && <CheckCircle size={18} />}

@@ -47,14 +47,14 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
         return <CheckCircle className="text-green-500 shrink-0" size={18} />
       case 'running':
         return isExpanded ? (
-          <Loader2 className="text-blue-500 animate-spin shrink-0" size={18} />
+          <Loader2 className="text-primary animate-spin shrink-0" size={18} />
         ) : (
-          <Loader2 className="text-blue-500 animate-spin shrink-0" size={18} />
+          <Loader2 className="text-primary animate-spin shrink-0" size={18} />
         )
       case 'failed':
         return <AlertCircle className="text-red-500 shrink-0" size={18} />
       default:
-        return <Circle className="text-gray-400 dark:text-gray-500 shrink-0" size={18} />
+        return <Circle className="text-muted-foreground shrink-0" size={18} />
     }
   }
   
@@ -77,9 +77,9 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
   }
   
   return (
-    <div className="bg-muted/50 dark:bg-muted/20 rounded-xl p-3 md:p-4 mx-2 md:mx-4 mb-3 border border-muted-foreground/20">
+    <div className="bg-muted/50 rounded-xl p-3 md:p-4 mx-2 md:mx-4 mb-3 border border-border">
       <h3 className="text-sm font-medium mb-3 flex items-center gap-2 text-foreground">
-        <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+        <span className="w-2 h-2 bg-primary rounded-full animate-pulse" />
         {runningStepId ? 'Processing...' : 'Planning steps'}
       </h3>
       <div className="space-y-1">
@@ -91,7 +91,7 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
             <div 
               key={step.id} 
               className={`transition-all duration-300 ${
-                isRunning ? 'bg-blue-500/10 dark:bg-blue-500/20 -mx-2 px-2 py-1 rounded-lg' : ''
+                isRunning ? 'bg-primary/10 -mx-2 px-2 py-1 rounded-lg' : ''
               }`}
               {...isActiveRef}
             >
@@ -99,7 +99,7 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
                 open={expandedSteps.has(step.id)}
                 onOpenChange={() => toggleStep(step.id)}
               >
-                <Collapsible.Trigger className="w-full flex items-start gap-2 text-left p-1 rounded hover:bg-muted/50 dark:hover:bg-muted/30 transition-colors">
+                <Collapsible.Trigger className="w-full flex items-start gap-2 text-left p-1 rounded hover:bg-muted/50 transition-colors">
                   <div className="mt-0.5">
                     {getStatusIcon(step.status, step.id)}
                   </div>
@@ -109,7 +109,7 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
                         step.status === 'completed' 
                           ? 'text-muted-foreground line-through' 
                           : step.status === 'failed'
-                          ? 'text-red-500 dark:text-red-400'
+                          ? 'text-red-500'
                           : 'text-foreground'
                       }`}>
                         {index + 1}. {step.description}
@@ -125,11 +125,11 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
                     </div>
                     <span className={`text-xs ${
                       step.status === 'completed' 
-                        ? 'text-green-500 dark:text-green-400' 
+                        ? 'text-green-500' 
                         : step.status === 'failed'
-                        ? 'text-red-500 dark:text-red-400'
+                        ? 'text-red-500'
                         : step.status === 'running'
-                        ? 'text-blue-500 dark:text-blue-400'
+                        ? 'text-primary'
                         : 'text-muted-foreground'
                     }`}>
                       {getStatusLabel(step.status)}
@@ -140,7 +140,7 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
                 <Collapsible.Content>
                   {step.logs && (
                     <div className="ml-7 mt-1 animate-in slide-in-from-top-2 duration-200">
-                      <pre className="p-3 bg-background dark:bg-background/50 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap text-muted-foreground border border-border">
+                      <pre className="p-3 bg-muted rounded-lg text-xs overflow-x-auto whitespace-pre-wrap text-muted-foreground border border-border">
                         {step.logs}
                       </pre>
                     </div>

@@ -5,23 +5,25 @@ import { useChatStore } from '../stores/chatStore'
 export function useSessions() {
   const { 
     sessions, 
-    setSessions, 
+    archivedSessions,
+    setSessions,
+    setArchivedSessions,
     addSession, 
     setActiveSession,
     activeSessionId,
-    updateSession
+    removeSession
   } = useChatStore()
   
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null)
   
-  const loadSessions = useCallback(async (includeArchived = false) => {
+  const loadSessions = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     
     try {
-      const response = await sessionsApi.list(includeArchived)
+      const response = await sessionsApi.list(false)
       setSessions(response.data.sessions)
     } catch (err) {
       setError('Failed to load sessions')
@@ -30,6 +32,21 @@ export function useSessions() {
       setIsLoading(false)
     }
   }, [setSessions])
+
+  const loadArchivedSessions = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+    
+    try {
+      const response = await sessionsApi.list(true)
+      setArchivedSessions(response.data.sessions)
+    } catch (err) {
+      setError('Failed to load archived sessions')
+      console.error(err)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [setArchivedSessions])
   
   const createSession = useCallback(async (title?: string) => {
     try {
@@ -67,35 +84,49 @@ export function useSessions() {
   const archiveSession = useCallback(async (sessionId: string) => {
     try {
       await sessionsApi.archive(sessionId)
-      updateSession(sessionId, { archived: true })
+      // Move session from sessions to archivedSessions
+      const session = sessions.find(s => s.id === sessionId)
+      if (session) {
+        removeSession(sessionId)
+        setArchivedSessions([...archivedSessions, { ...session, archived: true }])
+      }
+      await loadSessions()
+      await loadArchivedSessions()
     } catch (err) {
       setError('Failed to archive session')
       console.error(err)
       throw err
     }
-  }, [updateSession])
+  }, [sessions, archivedSessions, removeSession, setArchivedSessions, loadSessions, loadArchivedSessions])
   
   const unarchiveSession = useCallback(async (sessionId: string) => {
     try {
       await sessionsApi.unarchive(sessionId)
-      updateSession(sessionId, { archived: false })
+      // Move session from archivedSessions to sessions
+      const session = archivedSessions.find(s => s.id === sessionId)
+      if (session) {
+        removeSession(sessionId)
+        setSessions([{ ...session, archived: false }, ...sessions])
+      }
+      await loadSessions()
+      await loadArchivedSessions()
     } catch (err) {
       setError('Failed to unarchive session')
       console.error(err)
       throw err
     }
-  }, [updateSession])
+  }, [sessions, archivedSessions, removeSession, setSessions, loadSessions, loadArchivedSessions])
   
   const deleteSession = useCallback(async (sessionId: string) => {
     try {
       await sessionsApi.delete(sessionId)
-      updateSession(sessionId, { archived: true })
+      removeSession(sessionId)
     } catch (err) {
       setError('Failed to delete session')
       console.error(err)
       throw err
     }
-  }, [updateSession])
+  }, [removeSession])
   
   const searchSessions = useCallback(async (
     query: string, 
@@ -133,11 +164,13 @@ export function useSessions() {
   
   return {
     sessions,
+    archivedSessions,
     activeSessionId,
     isLoading,
     error,
     searchResults,
     loadSessions,
+    loadArchivedSessions,
     createSession,
     loadSession,
     archiveSession,

@@ -62,38 +62,74 @@ validation_cache = ValidationCache(ttl_seconds=300)
 # Provider validation functions
 async def validate_anthropic(api_key: str) -> Dict[str, Any]:
     """Validate Anthropic API key by making a minimal API call."""
-    try:
-        import anthropic
+    import anthropic
 
+    try:
         client = anthropic.Anthropic(api_key=api_key, timeout=10)
 
         # Make a minimal API call using messages API
         # Using a very short max_tokens to minimize cost
-        response = await asyncio.wait_for(
-            client.messages.create(
-                model="claude-3-haiku-20240307",
-                max_tokens=10,
-                messages=[{"role": "user", "content": "Hi"}],
-                extra_headers={"Anthropic-Version": "2023-06-01"},
-            ),
-            timeout=10,
+        # Run sync SDK call in a thread to avoid blocking
+        response = await asyncio.to_thread(
+            client.messages.create,
+            model="claude-sonnet-4-20250514",
+            max_tokens=10,
+            messages=[{"role": "user", "content": "Hi"}],
         )
 
+        logger.info(
+            f"Anthropic validation successful for key starting with {api_key[:10]}..."
+        )
         return {
             "valid": True,
             "provider": "anthropic",
             "message": "API key is valid",
-            "model_used": "claude-3-haiku-20240307",
+            "model_used": "claude-sonnet-4-20250514",
         }
 
     except anthropic.AuthenticationError as e:
+        logger.error(f"Anthropic auth error: {e}")
         return {
             "valid": False,
             "provider": "anthropic",
             "message": "Invalid API key or authentication failed",
             "error_type": "authentication",
         }
+    except anthropic.BadRequestError as e:
+        logger.error(f"Anthropic bad request error: {e}")
+        return {
+            "valid": False,
+            "provider": "anthropic",
+            "message": f"Bad request: {str(e)}",
+            "error_type": "bad_request",
+        }
+    except anthropic.APIStatusError as e:
+        status_code = e.status_code
+        logger.error(f"Anthropic API status error ({status_code}): {e}")
+        return {
+            "valid": False,
+            "provider": "anthropic",
+            "message": f"API error (status {status_code}): {str(e)}",
+            "error_type": f"http_{status_code}",
+        }
+    except anthropic.APIConnectionError as e:
+        logger.error(f"Anthropic connection error: {e}")
+        return {
+            "valid": False,
+            "provider": "anthropic",
+            "message": f"Connection error: {str(e)}",
+            "error_type": "connection",
+        }
+    except anthropic.APIError as e:
+        logger.error(f"Anthropic API error: {e}")
+        return {
+            "valid": False,
+            "provider": "anthropic",
+            "message": f"API error: {str(e)}",
+            "error_type": "api_error",
+        }
     except asyncio.TimeoutError:
+        logger.error("Anthropic request timed out")
         return {
             "valid": False,
             "provider": "anthropic",
@@ -101,35 +137,20 @@ async def validate_anthropic(api_key: str) -> Dict[str, Any]:
             "error_type": "timeout",
         }
     except Exception as e:
-        error_msg = str(e)
-        if "authentication" in error_msg.lower() or "401" in error_msg:
-            return {
-                "valid": False,
-                "provider": "anthropic",
-                "message": "Invalid API key or authentication failed",
-                "error_type": "authentication",
-            }
-        elif "rate limit" in error_msg.lower() or "429" in error_msg:
-            return {
-                "valid": False,
-                "provider": "anthropic",
-                "message": "Rate limit exceeded. Please try again later.",
-                "error_type": "rate_limit",
-            }
-        else:
-            return {
-                "valid": False,
-                "provider": "anthropic",
-                "message": f"Validation failed: {error_msg}",
-                "error_type": "unknown",
-            }
+        logger.error(f"Anthropic unexpected error: {type(e).__name__}: {e}")
+        return {
+            "valid": False,
+            "provider": "anthropic",
+            "message": f"Unexpected error: {type(e).__name__}: {str(e)}",
+            "error_type": "unknown",
+        }
 
 
 async def validate_openai(api_key: str) -> Dict[str, Any]:
     """Validate OpenAI API key by making a minimal API call."""
-    try:
-        from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, AuthenticationError as OpenAIAuthError
 
+    try:
         client = AsyncOpenAI(api_key=api_key, timeout=10)
 
         # Make a minimal API call to list models
@@ -146,7 +167,7 @@ async def validate_openai(api_key: str) -> Dict[str, Any]:
             "model": "models.list",
         }
 
-    except openai.AuthenticationError as e:
+    except OpenAIAuthError as e:
         return {
             "valid": False,
             "provider": "openai",

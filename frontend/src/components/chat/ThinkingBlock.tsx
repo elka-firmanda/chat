@@ -10,11 +10,11 @@ interface ThinkingBlockProps {
 }
 
 const agentColors = {
-  master: 'border-l-[#8b5cf6]',
-  planner: 'border-l-[#3b82f6]',
-  researcher: 'border-l-[#22c55e]',
-  tools: 'border-l-[#f97316]',
-  database: 'border-l-[#ec4899]'
+  master: 'border-l-agent-master',
+  planner: 'border-l-agent-planner',
+  researcher: 'border-l-agent-researcher',
+  tools: 'border-l-agent-tools',
+  database: 'border-l-agent-database'
 }
 
 const agentLabels = {

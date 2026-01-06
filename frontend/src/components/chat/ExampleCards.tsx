@@ -1,114 +1,139 @@
+import { useEffect, useMemo } from 'react'
+import { Search, Code, Database, Cloud } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { MessageSquare, BarChart, Brain, Sparkles, Search, TrendingUp, Globe, Zap } from 'lucide-react'
 
 interface ExampleCardsProps {
   onSelect: (question: string, requiresDeepSearch?: boolean) => void
 }
 
-// Keywords that suggest a question would benefit from deep search
-const DEEP_SEARCH_KEYWORDS = [
-  'latest', 'recent', 'current', 'new', 'trending', 'top',
-  'research', 'analyze', 'compare', 'what is', 'how does',
-  'explain', 'find', 'search', 'discover', 'explore',
-  'statistics', 'data', 'trends', 'market', 'industry',
-  'news', 'breakthroughs', 'developments', 'advancements'
+// Default example questions for fallback
+const defaultExamples = [
+  {
+    icon: Search,
+    title: "Research AI developments",
+    description: "What are the latest AI breakthroughs?",
+    color: "text-blue-500",
+    bgColor: "bg-blue-500/10",
+  },
+  {
+    icon: Code,
+    title: "Compare technologies",
+    description: "Compare Python vs JavaScript for web development",
+    color: "text-green-500",
+    bgColor: "bg-green-500/10",
+  },
+  {
+    icon: Database,
+    title: "Best practices",
+    description: "What are best practices for database design?",
+    color: "text-purple-500",
+    bgColor: "bg-purple-500/10",
+  },
+  {
+    icon: Cloud,
+    title: "Industry trends",
+    description: "What are the current trends in cloud computing?",
+    color: "text-orange-500",
+    bgColor: "bg-orange-500/10",
+  },
 ]
 
-interface QuestionItem {
-  text: string
-  requiresDeepSearch: boolean
+// Map example questions to card format
+function mapQuestionToCard(question: string, index: number) {
+  // Use default examples for matching, or generate from question
+  if (index < defaultExamples.length) {
+    return defaultExamples[index]
+  }
+  
+  // Generate a card from the question
+  const title = question.length > 50 ? question.substring(0, 47) + '...' : question
+  const icons = [Search, Code, Database, Cloud]
+  const colors = [
+    { color: "text-blue-500", bgColor: "bg-blue-500/10" },
+    { color: "text-green-500", bgColor: "bg-green-500/10" },
+    { color: "text-purple-500", bgColor: "bg-purple-500/10" },
+    { color: "text-orange-500", bgColor: "bg-orange-500/10" },
+  ]
+  
+  const iconIndex = index % icons.length
+  const colorIndex = index % colors.length
+  
+  return {
+    icon: icons[iconIndex],
+    title: title,
+    description: question,
+    color: colors[colorIndex].color,
+    bgColor: colors[colorIndex].bgColor,
+  }
 }
 
 export default function ExampleCards({ onSelect }: ExampleCardsProps) {
-  const { general } = useSettingsStore()
-  const examples = general.example_questions || []
+  const { general, loadConfig, isLoading } = useSettingsStore()
   
-  const iconSets = [
-    [MessageSquare, Brain],
-    [BarChart, TrendingUp],
-    [Globe, Search],
-    [Zap, Sparkles]
-  ]
+  // Load config on mount
+  useEffect(() => {
+    loadConfig()
+  }, [loadConfig])
   
-  // Check if a question might benefit from deep search
-  const analyzeQuestion = (text: string): { requiresDeepSearch: boolean; keywords: string[] } => {
-    const lowerText = text.toLowerCase()
-    const foundKeywords = DEEP_SEARCH_KEYWORDS.filter(keyword => 
-      lowerText.includes(keyword)
+  // Get example questions from config or use defaults
+  const examples = useMemo(() => {
+    const questions = general.example_questions && general.example_questions.length > 0
+      ? general.example_questions
+      : defaultExamples.map(ex => ex.description)
+    
+    return questions.map((question, index) => mapQuestionToCard(question, index))
+  }, [general.example_questions])
+  
+  const handleClick = (query: string) => {
+    onSelect(query, true)
+  }
+  
+  // Show loading state briefly
+  if (isLoading && general.example_questions.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-8">
+        <div className="animate-pulse text-muted-foreground">Loading examples...</div>
+      </div>
     )
-    return {
-      requiresDeepSearch: foundKeywords.length > 0,
-      keywords: foundKeywords
-    }
   }
-  
-  // Parse examples - support both string array and structured format
-  const parseExamples = (): QuestionItem[] => {
-    return examples.slice(0, 4).map(question => {
-      if (typeof question === 'string') {
-        const { requiresDeepSearch } = analyzeQuestion(question)
-        return { text: question, requiresDeepSearch }
-      }
-      return { text: question, requiresDeepSearch: false }
-    })
-  }
-  
-  const questionItems = parseExamples()
-  
-  if (questionItems.length === 0) return null
-  
+
   return (
-    <div className="max-w-2xl mx-auto">
-      <h3 className="text-xs font-medium text-muted-foreground mb-3 text-center uppercase tracking-wider">
-        Try asking
-      </h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 max-w-2xl mx-auto">
-        {questionItems.map((item, index) => {
-          const [Icon1, Icon2] = iconSets[index % iconSets.length]
-          const isDeepSearch = item.requiresDeepSearch
-          
+    <div className="flex-1 flex flex-col items-center justify-center p-8">
+      <div className="text-center mb-8">
+        <h2 className="text-3xl font-bold mb-2">Welcome to Agentic Chat</h2>
+        <p className="text-muted-foreground">
+          Ask anything or try one of these examples with Deep Search
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl w-full">
+        {examples.map((example, index) => {
+          const Icon = example.icon
           return (
             <button
               key={index}
-              onClick={() => onSelect(item.text, isDeepSearch)}
-              className={`relative flex items-start gap-3 p-4 min-h-[80px] rounded-xl bg-background hover:shadow-md transition-all duration-300 text-left group border-2 ${
-                isDeepSearch 
-                  ? 'border-violet-200 dark:border-violet-800 hover:border-violet-400 dark:hover:border-violet-600' 
-                  : 'border-transparent hover:border-accent'
-              }`}
+              onClick={() => handleClick(example.description)}
+              className="flex items-start gap-4 p-4 rounded-xl border border-border bg-background hover:bg-muted/50 transition-colors text-left group"
             >
-              {/* Deep search indicator badge */}
-              {isDeepSearch && (
-                <div className="absolute -top-2 -right-2 flex items-center gap-1 px-2 py-0.5 bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 text-[10px] font-medium rounded-full shadow-sm">
-                  <Sparkles size={10} className="animate-pulse" />
-                  Deep search
-                </div>
-              )}
-              
-              {/* Icon */}
-              <div className={`p-2 rounded-lg shrink-0 transition-colors ${
-                isDeepSearch 
-                  ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 group-hover:bg-violet-200 dark:group-hover:bg-violet-900/50' 
-                  : 'bg-muted text-muted-foreground group-hover:bg-accent group-hover:text-foreground'
-              }`}>
-                {isDeepSearch ? <Icon2 size={18} /> : <Icon1 size={18} />}
+              <div className={`p-2.5 rounded-lg ${example.bgColor}`}>
+                <Icon className={`w-5 h-5 ${example.color}`} />
               </div>
-              
-              {/* Question text */}
-              <span className="text-sm leading-snug group-hover:text-foreground transition-colors">
-                {item.text}
-              </span>
-              
-              {/* Hover gradient effect */}
-              <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none bg-gradient-to-r from-violet-500/5 to-blue-500/5 dark:from-violet-500/10 dark:to-blue-500/10" />
+              <div className="flex-1 min-w-0">
+                <h3 className="font-medium mb-1 group-hover:text-primary transition-colors">
+                  {example.title}
+                </h3>
+                <p className="text-sm text-muted-foreground line-clamp-2">
+                  {example.description}
+                </p>
+              </div>
             </button>
           )
         })}
       </div>
-      
-      {/* Footer note */}
-      <p className="text-[10px] text-muted-foreground/60 text-center mt-3">
-        Questions marked with <Sparkles size={10} className="inline-block text-violet-500" /> benefit from deep research
+
+      <p className="text-sm text-muted-foreground mt-8">
+        Enable <span className="font-medium text-primary">Deep Search</span> for
+        comprehensive research with multiple agents
       </p>
     </div>
   )

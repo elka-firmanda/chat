@@ -3,7 +3,7 @@ Chat repository for session and message operations.
 """
 
 from typing import List, Optional, Dict, Any
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -113,6 +113,70 @@ class ChatRepository:
         """Delete a session (soft delete by archiving)."""
         session_obj = await self.archive_session(session_id)
         return session_obj is not None
+
+    async def hard_delete_session(self, session_id: str) -> bool:
+        """Permanently delete a session and all related data."""
+        session_obj = await self.get_session(session_id)
+        if not session_obj:
+            return False
+
+        await self.session.execute(
+            delete(WorkingMemory).where(WorkingMemory.session_id == session_id)
+        )
+
+        await self.session.execute(
+            delete(AgentStep).where(AgentStep.session_id == session_id)
+        )
+
+        await self.session.execute(
+            delete(Message).where(Message.session_id == session_id)
+        )
+
+        await self.session.execute(
+            delete(ChatSession).where(ChatSession.id == session_id)
+        )
+
+        await self.session.commit()
+        return True
+
+    async def hard_delete_session(self, session_id: str) -> bool:
+        """
+        Permanently delete a session and all related data.
+
+        This will cascade delete:
+        - Messages
+        - Agent steps
+        - Working memory
+
+        Returns True if session was found and deleted, False otherwise.
+        """
+        # Check if session exists
+        session_obj = await self.get_session(session_id)
+        if not session_obj:
+            return False
+
+        # Delete working memory first (has session_id foreign key)
+        await self.session.execute(
+            delete(WorkingMemory).where(WorkingMemory.session_id == session_id)
+        )
+
+        # Delete agent steps (messages are linked through session, but steps need explicit delete)
+        await self.session.execute(
+            delete(AgentStep).where(AgentStep.session_id == session_id)
+        )
+
+        # Delete messages (cascades should handle this, but be explicit)
+        await self.session.execute(
+            delete(Message).where(Message.session_id == session_id)
+        )
+
+        # Delete the session itself
+        await self.session.execute(
+            delete(ChatSession).where(ChatSession.id == session_id)
+        )
+
+        await self.session.commit()
+        return True
 
     # Message operations
     async def create_message(

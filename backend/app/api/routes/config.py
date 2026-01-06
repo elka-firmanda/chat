@@ -21,6 +21,7 @@ from app.db.session import (
     update_config_file,
 )
 from app.db.migration import migrate_sqlite_to_postgresql
+from app.llm.models import list_models_for_provider
 
 
 router = APIRouter()
@@ -314,6 +315,36 @@ async def get_database_info_endpoint():
     Get information about the current database configuration.
     """
     return get_database_info()
+
+
+@router.get("/models")
+async def list_models_endpoint(
+    provider: str = Query(
+        ..., description="Provider name (anthropic, openai, openrouter)"
+    ),
+    api_key: Optional[str] = Query(
+        None, description="API key for the provider (required for openai, openrouter)"
+    ),
+):
+    try:
+        if not api_key:
+            config = get_config()
+            api_key = getattr(config.api_keys, provider.lower(), None)
+
+        if not api_key and provider.lower() in ("openai", "openrouter"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{provider} API key not configured. Please add your API key in Settings.",
+            )
+
+        models = await list_models_for_provider(provider, api_key)
+        return {"provider": provider, "models": models}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch models: {str(e)}")
 
 
 @router.post("/database/migrate")

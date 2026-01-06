@@ -13,6 +13,8 @@ interface KeyboardShortcutsHelpProps {
 const shortcuts: Shortcut[] = [
   { key: '⌘ + N', description: 'New chat' },
   { key: 'Ctrl + N', description: 'New chat (Windows)' },
+  { key: '⌘ + Shift + ?', description: 'Show keyboard shortcuts' },
+  { key: 'Ctrl + Shift + ?', description: 'Show shortcuts (Windows)' },
   { key: '⌘ + /', description: 'Toggle deep search' },
   { key: 'Ctrl + /', description: 'Toggle deep search (Windows)' },
   { key: '⌘ + ,', description: 'Open settings' },
