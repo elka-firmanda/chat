@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { MessageSquare } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useChatErrorStore, PendingError } from '../../stores/errorStore'
@@ -9,6 +9,7 @@ import InputBox from './InputBox'
 import ProgressSteps from './ProgressSteps'
 import WorkingMemoryVisualization from './WorkingMemoryVisualization'
 import ErrorModal from './ErrorModal'
+import ToastContainer from '../ui/Toast'
 import { useChat } from '../../hooks/useChat'
 import { useSSE } from '../../hooks/useSSE'
 import { useSessionCancellation } from '../../hooks/useSessionCancellation'
@@ -30,15 +31,16 @@ export default function ChatContainer() {
     setActiveNode,
     addThought
   } = useChatStore()
-  
-  const { 
-    pendingError, 
+
+  const {
+    pendingError,
     setPendingError,
-    clearErrorState 
+    clearErrorState
   } = useChatErrorStore()
-  
+
   const [isIntervening, setIsIntervening] = useState(false)
-  
+  const [editingMessage, setEditingMessage] = useState<{id: string, content: string} | null>(null)
+
   const sessionMessages = activeSessionId ? messages[activeSessionId] || [] : []
   const currentSteps = activeSessionId ? agentSteps[activeSessionId] || [] : []
   const { sendMessage, isLoading: isChatLoading } = useChat()
@@ -49,6 +51,21 @@ export default function ChatContainer() {
   const handleSelectExample = async (question: string) => {
     await sendMessage(question, isDeepSearchEnabled)
   }
+
+  const handleEditMessage = useCallback((messageId: string, newContent: string) => {
+    setEditingMessage({ id: messageId, content: newContent })
+  }, [])
+
+  const handleSubmitEditedMessage = useCallback(async (content: string) => {
+    if (!editingMessage) return
+
+    await sendMessage(content, isDeepSearchEnabled)
+    setEditingMessage(null)
+  }, [editingMessage, sendMessage, isDeepSearchEnabled])
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessage(null)
+  }, [])
 
   // Memoize SSE handlers to prevent infinite re-render loops
   // These must be stable references so useSSE doesn't re-run on every render
@@ -220,6 +237,7 @@ export default function ChatContainer() {
   if (sessionMessages.length === 0) {
     return (
       <div className="flex-1 flex flex-col">
+        <ToastContainer />
         {/* Welcome header */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8">
           <div className="w-16 h-16 md:w-20 md:h-20 bg-primary/10 rounded-2xl flex items-center justify-center mb-4 md:mb-6">
@@ -232,21 +250,22 @@ export default function ChatContainer() {
             Ask me anything about research, data analysis, or general questions.
           </p>
         </div>
-        
+
         {/* Example cards */}
         <div className="p-4 md:p-6 border-t bg-muted/30">
           <ExampleCards onSelect={handleSelectExample} />
         </div>
-        
+
         {/* Input box */}
         <InputBox />
       </div>
     )
   }
-  
+
   // Show messages with progress steps and input at bottom
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      <ToastContainer />
       {/* Error Modal */}
       <ErrorModal
         isOpen={isIntervening && pendingError !== null}
@@ -271,7 +290,7 @@ export default function ChatContainer() {
       {/* Messages area - scrollable */}
       <div className="flex-1 overflow-auto p-3 md:p-4 space-y-3 md:space-y-4">
         {sessionMessages.map((message) => (
-          <Message key={message.id} message={message} />
+          <Message key={message.id} message={message} onEdit={handleEditMessage} />
         ))}
         {isChatLoading && sessionMessages.length > 0 && sessionMessages[sessionMessages.length - 1]?.role === 'user' && (
           <div className="flex gap-3 p-3">
@@ -290,7 +309,11 @@ export default function ChatContainer() {
       </div>
       
       {/* Input box */}
-      <InputBox />
+      <InputBox
+        initialValue={editingMessage?.content || ''}
+        onSubmit={handleSubmitEditedMessage}
+        onCancel={handleCancelEdit}
+      />
     </div>
   )
 }

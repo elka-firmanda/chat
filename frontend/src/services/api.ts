@@ -127,14 +127,17 @@ export const chatApi = {
       `/chat/intervene/${sessionId}`,
       { action }
     ),
-  
+
   getInterventionStatus: (sessionId: string) =>
     api.get<{
       session_id: string
       awaiting_response: boolean
       pending_error: Record<string, unknown> | null
       available_actions: string[]
-    }>(`/chat/intervention/${sessionId}`)
+    }>(`/chat/intervention/${sessionId}`),
+
+  regenerate: (messageId: string) =>
+    api.post<{ message_id: string; session_id: string; created_at: string }>(`/chat/regenerate/${messageId}`)
 }
 
 // Config APIs

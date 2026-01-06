@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
-import { Send, Search, Sparkles, Info } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Send, Search, Sparkles, Info, X } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { useChatStore } from '../../stores/chatStore'
 import { useChat } from '../../hooks/useChat'
@@ -7,49 +7,78 @@ import { useChat } from '../../hooks/useChat'
 const MAX_MESSAGE_LENGTH = 10000
 const WARNING_THRESHOLD = 8000
 
-export default function InputBox() {
-  const [message, setMessage] = useState('')
+interface InputBoxProps {
+  initialValue?: string
+  onSubmit?: (content: string) => void
+  onCancel?: () => void
+}
+
+export default function InputBox({ initialValue = '', onSubmit, onCancel }: InputBoxProps) {
+  const [message, setMessage] = useState(initialValue)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const characterCount = message.length
   const isOverLimit = characterCount > MAX_MESSAGE_LENGTH
   const isNearLimit = characterCount >= WARNING_THRESHOLD && !isOverLimit
-  
+  const isEditing = initialValue !== ''
+
   const { isDeepSearchEnabled, toggleDeepSearch, isLoading } = useChatStore()
   const { sendMessage } = useChat()
-  
-  const handleSubmit = async (e: React.FormEvent) => {
+
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     if (!message.trim() || isLoading || isOverLimit) return
-    
+
     const content = message.trim()
     setMessage('')
-    
-    try {
-      await sendMessage(content, isDeepSearchEnabled)
-    } catch (error) {
-      console.error('Failed to send message:', error)
+
+    if (onSubmit) {
+      onSubmit(content)
+    } else {
+      try {
+        await sendMessage(content, isDeepSearchEnabled)
+      } catch (error) {
+        console.error('Failed to send message:', error)
+      }
     }
-  }
-  
+  }, [message, isLoading, isOverLimit, onSubmit, sendMessage, isDeepSearchEnabled])
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit(e)
     }
   }
-  
-  // Auto-resize textarea
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
     }
   }, [message])
-  
+
+  useEffect(() => {
+    if (isEditing && textareaRef.current) {
+      textareaRef.current.focus()
+      textareaRef.current.setSelectionRange(textareaRef.current.value.length, textareaRef.current.value.length)
+    }
+  }, [isEditing])
+
   return (
     <div className="border-t bg-background">
-      <form 
-        onSubmit={handleSubmit} 
+      {isEditing && (
+        <div className="px-4 py-2 bg-muted/50 border-b flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">Editing message</span>
+          <button
+            onClick={onCancel}
+            className="p-1 hover:bg-muted rounded transition-colors"
+            title="Cancel editing"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+      <form
+        onSubmit={handleSubmit}
         className="flex items-end gap-2 p-3 md:p-4"
       >
         {/* Deep search toggle with tooltip */}
@@ -76,7 +105,7 @@ export default function InputBox() {
               </button>
             </Tooltip.Trigger>
             <Tooltip.Portal>
-              <Tooltip.Content 
+              <Tooltip.Content
                 className="z-50 px-3 py-2 bg-popover text-popover-foreground text-sm rounded-lg shadow-lg border max-w-xs animate-in fade-in zoom-in-95"
                 sideOffset={5}
               >
@@ -85,7 +114,7 @@ export default function InputBox() {
                   <div>
                     <p className="font-medium mb-0.5">Deep Search</p>
                     <p className="text-xs text-muted-foreground">
-                      {isDeepSearchEnabled 
+                      {isDeepSearchEnabled
                         ? 'Enabled • Uses Tavily API, web scraping, and parallel research for comprehensive answers.'
                         : 'Disabled • Click to enable deep research with Tavily API and intelligent web scraping.'}
                     </p>
@@ -96,7 +125,7 @@ export default function InputBox() {
             </Tooltip.Portal>
           </Tooltip.Root>
         </Tooltip.Provider>
-        
+
         {/* Text input - grows to fill space */}
         <div className="flex-1 relative">
           <textarea
@@ -106,9 +135,9 @@ export default function InputBox() {
             onKeyDown={handleKeyDown}
             placeholder={isDeepSearchEnabled ? "Ask anything with deep research..." : "Message..."}
             className={`w-full resize-none min-h-[44px] max-h-[150px] md:max-h-[200px] p-3 pr-12 rounded-xl border focus:outline-none focus:ring-2 text-base md:text-sm transition-colors ${
-              isDeepSearchEnabled 
-                ? 'border-violet-200 dark:border-violet-800 focus:ring-violet-500' 
-                : isOverLimit 
+              isDeepSearchEnabled
+                ? 'border-violet-200 dark:border-violet-800 focus:ring-violet-500'
+                : isOverLimit
                   ? 'border-red-300 dark:border-red-700 focus:ring-red-500'
                   : 'border-input focus:ring-primary'
             }`}
@@ -119,10 +148,10 @@ export default function InputBox() {
           />
           {/* Character count indicator */}
           <div className={`absolute right-3 bottom-1 translate-y-1/2 text-xs ${
-            isOverLimit 
-              ? 'text-red-500 font-medium' 
-              : isNearLimit 
-                ? 'text-amber-500' 
+            isOverLimit
+              ? 'text-red-500 font-medium'
+              : isNearLimit
+                ? 'text-amber-500'
                 : 'text-muted-foreground'
           }`}>
             {characterCount.toLocaleString()} / {MAX_MESSAGE_LENGTH.toLocaleString()}
@@ -134,7 +163,7 @@ export default function InputBox() {
             </div>
           )}
         </div>
-        
+
         {/* Send button - larger touch target on mobile */}
         <button
           type="submit"
@@ -144,12 +173,12 @@ export default function InputBox() {
               ? 'bg-violet-600 hover:bg-violet-700 text-white'
               : 'bg-primary text-primary-foreground hover:bg-primary/90'
           } disabled:opacity-50 disabled:cursor-not-allowed`}
-          aria-label="Send message"
+          aria-label={isEditing ? "Send edited message" : "Send message"}
         >
           <Send size={20} />
         </button>
       </form>
-      
+
       {/* Deep search indicator */}
       {isDeepSearchEnabled && (
         <div className="px-4 pb-3 md:px-4 md:pb-4">

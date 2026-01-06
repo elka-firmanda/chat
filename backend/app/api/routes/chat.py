@@ -485,3 +485,70 @@ async def get_intervention_status(session_id: str):
         if intervention_state.awaiting_response
         else [],
     }
+
+
+@router.post("/regenerate/{message_id}")
+async def regenerate_message(
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Regenerate the assistant response for a given message.
+
+    Re-runs the agent workflow with the same user message.
+    """
+    repo = ChatRepository(db)
+
+    original_message = await repo.get_message(message_id)
+    if not original_message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if original_message.role != "user":
+        raise HTTPException(
+            status_code=400, detail="Can only regenerate responses to user messages"
+        )
+
+    session_id = original_message.session_id
+
+    chat_session = await repo.get_session(session_id)
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    deep_search = (
+        original_message.extra_data.get("deep_search", False)
+        if original_message.extra_data
+        else False
+    )
+
+    assistant_message = await repo.create_message(
+        session_id=session_id,
+        role="assistant",
+        content="",
+        agent_type="master",
+        extra_data={"deep_search": deep_search, "regenerated_from": message_id},
+    )
+
+    await repo.save_working_memory(
+        session_id=session_id,
+        memory_tree={},
+        timeline=[],
+        index_map={},
+    )
+
+    asyncio.create_task(
+        run_agent_with_events(
+            session_id=session_id,
+            user_message=original_message.content,
+            deep_search=deep_search,
+            message_id=assistant_message.id,
+            user_timezone="UTC",
+        )
+    )
+
+    return {
+        "message_id": assistant_message.id,
+        "session_id": session_id,
+        "created_at": assistant_message.created_at.isoformat()
+        if assistant_message.created_at
+        else None,
+    }

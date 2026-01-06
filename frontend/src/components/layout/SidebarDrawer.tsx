@@ -12,7 +12,7 @@ interface SidebarDrawerProps {
 }
 
 export default function SidebarDrawer({ isOpen, onClose, onNewChat, onSettingsClick }: SidebarDrawerProps) {
-  const { sessions, activeSessionId, loadSession, isLoading, archiveSession, unarchiveSession, deleteSession } = useSessions()
+  const { sessions, activeSessionId, loadSession, isLoading, unarchiveSession, deleteSession } = useSessions()
 
   const [showArchived, setShowArchived] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
@@ -185,12 +185,12 @@ export default function SidebarDrawer({ isOpen, onClose, onNewChat, onSettingsCl
           </div>
 
           <div className="p-2 border-t shrink-0">
-            <button 
+            <button
               onClick={() => {
                 onClose()
                 onSettingsClick?.()
               }}
-              className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-sm hover:bg-accent rounded-lg transition-colors touch-manipulation cursor-pointer"
+              className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-sm rounded-lg border border-border hover:bg-accent hover:border-accent-foreground/20 transition-all touch-manipulation cursor-pointer text-muted-foreground hover:text-foreground"
             >
               <Settings size={16} />
               <span>Settings</span>

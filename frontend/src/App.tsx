@@ -2,12 +2,14 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 import Layout from './components/layout/Layout'
 import ChatContainer from './components/chat/ChatContainer'
+import ToastContainer from './components/ui/Toast'
 
 const SettingsModal = lazy(() => import('./components/settings/SettingsModal'))
 
 function App() {
   return (
     <BrowserRouter>
+      <ToastContainer />
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<ChatContainer />} />

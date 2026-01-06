@@ -6,7 +6,11 @@ import { ChevronUp, Loader2, List, Layers } from 'lucide-react'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { SkeletonMessage } from '../ui/Skeleton'
 
-export default function MessageList() {
+interface MessageListProps {
+  onEditMessage?: (messageId: string, newContent: string) => void
+}
+
+export default function MessageList({ onEditMessage }: MessageListProps) {
   const { activeSessionId, messages, messageTotal } = useChatStore()
   const sessionMessages = activeSessionId ? messages[activeSessionId] || [] : []
   const totalMessages = activeSessionId ? messageTotal[activeSessionId] || 0 : 0
@@ -102,7 +106,7 @@ export default function MessageList() {
     const isLast = index === sessionMessages.length - 1
     return (
       <div className={isFirst ? 'pt-4' : ''}>
-        <Message key={message.id} message={message} />
+        <Message key={message.id} message={message} onEdit={onEditMessage} />
         {isLast && <div className="pb-4" />}
       </div>
     )

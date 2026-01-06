@@ -78,6 +78,55 @@ export function useChat() {
     }
   }, [activeSessionId, addMessage, addThought, isLoading, setLoading])
 
+  const regenerateMessage = useCallback(async (messageId: string, onStream?: (chunk: string) => void) => {
+    if (!activeSessionId || isLoading) return
+
+    setLoading(true)
+
+    try {
+      const response = await chatApi.regenerate(messageId)
+      const { message_id, session_id } = response.data
+
+      if (onStream) {
+        const eventSource = chatApi.stream(session_id)
+
+        eventSource.addEventListener('thought', (e) => {
+          try {
+            const data = JSON.parse(e.data)
+            addThought(session_id, data.agent, data.content)
+          } catch (err) {
+            console.error('Failed to parse thought event:', err)
+          }
+        })
+
+        eventSource.addEventListener('message_chunk', (e) => {
+          const data = JSON.parse(e.data)
+          if (data.content) {
+            onStream(data.content)
+          }
+        })
+
+        eventSource.addEventListener('complete', () => {
+          eventSource.close()
+          setLoading(false)
+        })
+
+        eventSource.onerror = () => {
+          eventSource.close()
+          setLoading(false)
+        }
+      } else {
+        setLoading(false)
+      }
+
+      return { message_id, session_id }
+    } catch (error) {
+      console.error('Failed to regenerate message:', error)
+      setLoading(false)
+      throw error
+    }
+  }, [activeSessionId, isLoading, setLoading, addThought])
+
   const loadMessages = useCallback(async (sessionId: string, limit = 30, offset = 0) => {
     try {
       const response = await sessionsApi.get(sessionId, limit, offset)
@@ -145,6 +194,7 @@ export function useChat() {
 
   return {
     sendMessage,
+    regenerateMessage,
     loadMessages,
     loadMoreMessages,
     cancelExecution,

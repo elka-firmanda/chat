@@ -62,7 +62,7 @@ export default function ExampleCards({ onSelect }: ExampleCardsProps) {
       <h3 className="text-xs font-medium text-muted-foreground mb-3 text-center uppercase tracking-wider">
         Try asking
       </h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 max-w-2xl mx-auto">
         {questionItems.map((item, index) => {
           const [Icon1, Icon2] = iconSets[index % iconSets.length]
           const isDeepSearch = item.requiresDeepSearch
@@ -71,7 +71,7 @@ export default function ExampleCards({ onSelect }: ExampleCardsProps) {
             <button
               key={index}
               onClick={() => onSelect(item.text, isDeepSearch)}
-              className={`relative flex items-start gap-3 p-4 rounded-xl bg-background hover:shadow-md transition-all duration-300 text-left group border-2 ${
+              className={`relative flex items-start gap-3 p-4 min-h-[80px] rounded-xl bg-background hover:shadow-md transition-all duration-300 text-left group border-2 ${
                 isDeepSearch 
                   ? 'border-violet-200 dark:border-violet-800 hover:border-violet-400 dark:hover:border-violet-600' 
                   : 'border-transparent hover:border-accent'

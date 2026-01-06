@@ -88,7 +88,7 @@ export default function Sidebar({ sessions, activeSessionId, isLoading, onNewCha
       <div className="p-2 border-t shrink-0">
         <button
           onClick={onSettingsClick}
-          className="w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] text-sm rounded-lg hover:bg-accent transition-colors touch-manipulation cursor-pointer"
+          className="w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] text-sm rounded-lg border border-border hover:bg-accent hover:border-accent-foreground/20 transition-all touch-manipulation cursor-pointer text-muted-foreground hover:text-foreground"
           title={isCollapsed ? 'Settings' : undefined}
         >
           <Settings size={16} />
