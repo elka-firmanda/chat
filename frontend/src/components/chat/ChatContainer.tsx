@@ -269,7 +269,7 @@ export default function ChatContainer() {
       <ProgressSteps steps={currentSteps} />
       
       {/* Messages area - scrollable */}
-      <div className="flex-1 overflow-auto p-3 md:p-4 pb-0 space-y-3 md:space-y-4">
+      <div className="flex-1 overflow-auto p-3 md:p-4 pb-0 space-y-2">
         {sessionMessages.map((message) => (
           <Message key={message.id} message={message} onEdit={handleEditMessage} />
         ))}

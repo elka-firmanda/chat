@@ -50,9 +50,9 @@ export default function InputBox({ initialValue = '', onSubmit, onCancel }: Inpu
   }
 
   return (
-    <div className="border-t border-border bg-background">
-      <div className="max-w-3xl mx-auto px-4 py-4 pb-2">
-        <div className="flex items-end gap-3 bg-secondary border border-border rounded-2xl px-4 py-3">
+    <div className="border-t border-border bg-background pb-2">
+      <div className="max-w-3xl mx-auto px-4">
+          <div className="flex items-end gap-3 bg-secondary border border-border rounded-2xl px-4 py-2">
           <textarea
             ref={textareaRef}
             value={input}
@@ -103,7 +103,7 @@ export default function InputBox({ initialValue = '', onSubmit, onCancel }: Inpu
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground text-center mt-2 flex items-center justify-center gap-2">
+        <p className="text-xs text-muted-foreground text-center mt-1 flex items-center justify-center gap-2">
           <span>
             {isDeepSearchEnabled
               ? "Deep Search enabled - AI agents will research and verify information"
@@ -114,7 +114,7 @@ export default function InputBox({ initialValue = '', onSubmit, onCancel }: Inpu
           </kbd>
         </p>
 
-        <div className="flex items-center justify-center gap-1 mt-1">
+        <div className="flex items-center justify-center gap-1 mt-0">
           <span
             className={cn(
               "text-xs font-medium",
