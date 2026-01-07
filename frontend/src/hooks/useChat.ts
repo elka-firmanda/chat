@@ -27,16 +27,18 @@ export function useChat() {
       const response = await chatApi.send(content, activeSessionId || undefined, deepSearch)
       const { message_id, session_id } = response.data
 
+      // Set active session FIRST so UI is ready to display messages
+      if (!activeSessionId) {
+        useChatStore.getState().setActiveSession(session_id)
+      }
+
+      // Then add message (UI will now be watching the correct session)
       addMessage(session_id, {
         id: message_id,
         role: 'user',
         content,
         created_at: new Date().toISOString()
       })
-
-      if (!activeSessionId) {
-        useChatStore.getState().setActiveSession(session_id)
-      }
 
       if (onStream) {
         const eventSource = chatApi.stream(session_id)
