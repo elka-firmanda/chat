@@ -103,7 +103,7 @@ function SwipeableSessionItem({
           </p>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">
-              {formatDate(session.updated_at)}
+              {formatDate(session.updated_at || session.created_at)}
             </span>
             {isArchived && (
               <span className="text-[10px] px-1.5 py-0.5 bg-amber-500 text-white rounded">
