@@ -537,8 +537,12 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
       toast.success('Settings saved successfully')
       // Keep modal open - don't call onOpenChange(false)
     } catch (err) {
-      setError('Failed to save configuration')
-      console.error(err)
+      const errorMessage = err instanceof Error ? err.message :
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        (err as { response?: { data?: string } })?.response?.data ||
+        'Failed to save configuration'
+      setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage))
+      console.error('Save error:', err)
     } finally {
       setSaving(false)
     }

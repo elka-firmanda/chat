@@ -147,8 +147,9 @@ async def rate_limit_middleware(request: Request, call_next):
     elif "/api/v1/chat/stream/" in path and method == "GET":
         endpoint_key = "chat_stream"
         is_concurrent = True
+    # Skip rate limiting for config updates - user settings saves should not be rate limited
     elif path == "/api/v1/config" and method == "POST":
-        endpoint_key = "config_update"
+        return await call_next(request)
 
     # Check rate limit
     is_allowed, response = await rate_limiter.check_rate_limit(
