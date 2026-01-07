@@ -121,7 +121,9 @@ class RateLimiter:
     DEFAULT_LIMITS = {
         "chat_message": RateLimitConfig(requests=10, window_seconds=60),  # 10 req/min
         "chat_stream": RateLimitConfig(requests=5, window_seconds=60),  # 5 concurrent
-        "config_update": RateLimitConfig(requests=5, window_seconds=60),  # 5 req/min
+        "config_update": RateLimitConfig(
+            requests=30, window_seconds=60
+        ),  # 30 req/min - user settings save
         "default": RateLimitConfig(requests=30, window_seconds=60),  # 30 req/min
     }
 

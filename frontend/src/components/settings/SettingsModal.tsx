@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
-import { X, Check, AlertCircle, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon, Plus, Trash2, Edit, Wrench, Key as KeyIcon, RefreshCw } from 'lucide-react'
+import { X, Check, AlertCircle, Eye, EyeOff, Save, Loader2, Database, Cpu, Search, Hammer, Server, Globe, Settings as SettingsIcon, Plus, Trash2, Edit, Wrench, RefreshCw } from 'lucide-react'
 import { toolsApi, configApi, type CustomTool, type ModelOption } from '../../services/api'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useToastStore } from '../../hooks/useToast'
 
 // Provider options
 const PROVIDERS = [
@@ -107,12 +108,6 @@ interface ConfigData {
     tools: AgentConfig
     database: AgentConfig
   }
-  api_keys: {
-    anthropic: string
-    openai: string
-    openrouter: string
-    tavily: string
-  }
   profiles: {
     fast: { master: { model: string }; planner: { model: string } }
     deep: { master: { model: string }; researcher: { max_urls_to_scrape: number } }
@@ -174,12 +169,6 @@ const defaultConfig: ConfigData = {
       data_warehouse_schema: '',
       system_prompt: 'You query and analyze data from the data warehouse.',
     },
-  },
-  api_keys: {
-    anthropic: '',
-    openai: '',
-    openrouter: '',
-    tavily: '',
   },
   profiles: {
     fast: { master: { model: 'gpt-3.5-turbo' }, planner: { model: 'gpt-3.5-turbo' } },
@@ -503,6 +492,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [profile, setProfile] = useState('custom')
+  const { toast } = useToastStore()
   const detectedTimezone = typeof Intl !== 'undefined' 
     ? Intl.DateTimeFormat().resolvedOptions().timeZone 
     : 'UTC'
@@ -517,7 +507,6 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
         general: data.general || defaultConfig.general,
         database: data.database || defaultConfig.database,
         agents: data.agents || defaultConfig.agents,
-        api_keys: data.api_keys || defaultConfig.api_keys,
         profiles: data.profiles || defaultConfig.profiles,
       })
     } catch (err) {
@@ -542,11 +531,11 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
         general: config.general,
         database: config.database,
         agents: config.agents,
-        api_keys: config.api_keys,
         profiles: config.profiles,
       })
       await loadConfig()
-      onOpenChange(false)
+      toast.success('Settings saved successfully')
+      // Keep modal open - don't call onOpenChange(false)
     } catch (err) {
       setError('Failed to save configuration')
       console.error(err)
@@ -707,16 +696,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                 <Server size={18} className="shrink-0" />
                 <span className="hidden sm:inline">DB Agent</span>
               </Tabs.Trigger>
-              <Tabs.Trigger
-                value="api-keys"
-                title="API Keys"
-                className={`flex items-center justify-center sm:justify-start gap-2 p-2.5 sm:px-3 sm:py-2.5 min-h-[44px] min-w-[44px] sm:w-full rounded-lg text-sm transition-colors touch-manipulation ${
-                  activeTab === 'api-keys' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-              >
-                <KeyIcon size={18} className="shrink-0" />
-                <span className="hidden sm:inline">API Keys</span>
-              </Tabs.Trigger>
+
               <Tabs.Trigger
                 value="custom-tools"
                 title="Custom Tools"
@@ -934,43 +914,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
                 />
               </Tabs.Content>
 
-              <Tabs.Content value="api-keys" className="space-y-6">
-                <div>
-                  <h3 className="font-medium mb-4 flex items-center gap-2">
-                    <KeyIcon size={18} />
-                    API Keys
-                  </h3>
-                  <div className="space-y-4">
-                    <ApiKeyInput
-                      label="Anthropic API Key"
-                      provider="anthropic"
-                      value={config.api_keys.anthropic}
-                      onChange={(v) => setConfig({ ...config, api_keys: { ...config.api_keys, anthropic: v } })}
-                      placeholder="sk-ant-..."
-                    />
-                    <ApiKeyInput
-                      label="OpenAI API Key"
-                      provider="openai"
-                      value={config.api_keys.openai}
-                      onChange={(v) => setConfig({ ...config, api_keys: { ...config.api_keys, openai: v } })}
-                      placeholder="sk-..."
-                    />
-                    <ApiKeyInput
-                      label="OpenRouter API Key"
-                      provider="openrouter"
-                      value={config.api_keys.openrouter}
-                      onChange={(v) => setConfig({ ...config, api_keys: { ...config.api_keys, openrouter: v } })}
-                    />
-                    <ApiKeyInput
-                      label="Tavily API Key"
-                      provider="tavily"
-                      value={config.api_keys.tavily}
-                      onChange={(v) => setConfig({ ...config, api_keys: { ...config.api_keys, tavily: v } })}
-                      placeholder="tvly-..."
-                    />
-                  </div>
-                </div>
-              </Tabs.Content>
+
 
               <Tabs.Content value="custom-tools">
                 <CustomToolsTab />
