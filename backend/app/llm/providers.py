@@ -389,6 +389,17 @@ class OpenAIProvider(BaseLLMProvider):
         ]
     )
 
+    # Reasoning models that only support temperature=1 (default)
+    MODELS_FIXED_TEMPERATURE = frozenset(
+        [
+            "o1",
+            "o1-mini",
+            "o1-preview",
+            "o3",
+            "o3-mini",
+        ]
+    )
+
     def __init__(self, config: ProviderConfig):
         super().__init__(config)
         self._client = None
@@ -397,6 +408,14 @@ class OpenAIProvider(BaseLLMProvider):
         """Check if the model requires max_completion_tokens instead of max_tokens."""
         model = self.config.model.lower()
         for pattern in self.MODELS_REQUIRING_MAX_COMPLETION_TOKENS:
+            if model.startswith(pattern):
+                return True
+        return False
+
+    def _has_fixed_temperature(self) -> bool:
+        """Check if the model only supports temperature=1 (reasoning models)."""
+        model = self.config.model.lower()
+        for pattern in self.MODELS_FIXED_TEMPERATURE:
             if model.startswith(pattern):
                 return True
         return False
@@ -508,9 +527,11 @@ class OpenAIProvider(BaseLLMProvider):
         request_kwargs: Dict[str, Any] = dict(
             model=self.config.model,
             messages=chat_messages,
-            temperature=temperature or self.config.temperature,
             stream=False,
         )
+
+        if not self._has_fixed_temperature():
+            request_kwargs["temperature"] = temperature or self.config.temperature
 
         if self._uses_max_completion_tokens():
             request_kwargs["max_completion_tokens"] = token_limit
@@ -578,9 +599,11 @@ class OpenAIProvider(BaseLLMProvider):
         request_kwargs: Dict[str, Any] = dict(
             model=self.config.model,
             messages=chat_messages,
-            temperature=temperature or self.config.temperature,
             stream=True,
         )
+
+        if not self._has_fixed_temperature():
+            request_kwargs["temperature"] = temperature or self.config.temperature
 
         if self._uses_max_completion_tokens():
             request_kwargs["max_completion_tokens"] = token_limit
