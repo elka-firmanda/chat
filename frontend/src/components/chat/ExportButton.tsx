@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Download, FileText, FileSpreadsheet, FileJson, ChevronDown } from 'lucide-react'
+import { sessionsApi } from '../../services/api'
 
 interface ExportButtonProps {
   sessionId: string
@@ -19,19 +20,31 @@ export default function ExportButton({ sessionId, className }: ExportButtonProps
     setError(null)
 
     try {
-      // TODO: Implement export API calls
-      // This is a placeholder that will be implemented when the export API is ready
-      console.log(`Exporting session ${sessionId} as ${format}`)
+      if (format !== 'pdf') {
+        setError(`${format.toUpperCase()} export not yet supported`)
+        return
+      }
+
+      const response = await sessionsApi.export(sessionId)
+      const blob = new Blob([response.data], { type: 'application/pdf' })
       
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // When the API is ready, use this pattern:
-      // const exportDoc = await api.createComparisonExport(sessionId)
-      // const blob = await api.downloadComparisonPDF/CSV/JSON(exportDoc.id)
-      // const filename = `${exportDoc.title.replace(/ /g, '_')}.${format}`
-      // Download blob...
-      
+      const contentDisposition = response.headers['content-disposition']
+      let filename = `session_${sessionId}.pdf`
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^";\n]+)"?/)
+        if (match) {
+          filename = match[1]
+        }
+      }
+
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Export failed:', err)
       setError(err instanceof Error ? err.message : 'Export failed')
@@ -86,26 +99,28 @@ export default function ExportButton({ sessionId, className }: ExportButtonProps
 
               <button
                 onClick={() => handleExport('csv')}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-secondary transition-colors text-left"
+                disabled
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-secondary transition-colors text-left opacity-50 cursor-not-allowed"
               >
                 <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
                 <div>
                   <div className="font-medium">CSV</div>
                   <div className="text-xs text-muted-foreground">
-                    Tabular data for spreadsheets
+                    Coming soon
                   </div>
                 </div>
               </button>
 
               <button
                 onClick={() => handleExport('json')}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-secondary transition-colors text-left"
+                disabled
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-secondary transition-colors text-left opacity-50 cursor-not-allowed"
               >
                 <FileJson className="w-4 h-4 text-muted-foreground" />
                 <div>
                   <div className="font-medium">JSON</div>
                   <div className="text-xs text-muted-foreground">
-                    Raw structured data
+                    Coming soon
                   </div>
                 </div>
               </button>
