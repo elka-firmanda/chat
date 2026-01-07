@@ -129,23 +129,12 @@ export default function ChatContainer() {
     },
     onMessageChunk: (data: { content: string; delta?: string }) => {
       if (activeSessionId) {
-        // Use fresh state to avoid stale closure issues
         const currentMessages = useChatStore.getState().messages[activeSessionId] || []
         const lastMessage = currentMessages[currentMessages.length - 1]
 
         if (lastMessage && lastMessage.role === 'assistant') {
-          // Backend sends 'content' as accumulated content, use it directly
-          // (not appending, since data.content already contains the full response so far)
           updateMessage(activeSessionId, lastMessage.id, {
             content: data.content
-          })
-        } else {
-          addMessage(activeSessionId, {
-            id: `temp-${Date.now()}`,
-            role: 'assistant',
-            content: data.content,
-            agent_type: 'master',
-            created_at: new Date().toISOString()
           })
         }
       }

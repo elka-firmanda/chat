@@ -25,19 +25,29 @@ export function useChat() {
 
     try {
       const response = await chatApi.send(content, activeSessionId || undefined, deepSearch)
-      const { message_id, session_id } = response.data
+      const { message_id: assistantMessageId, session_id, created_at } = response.data
 
       // Set active session FIRST so UI is ready to display messages
       if (!activeSessionId) {
         useChatStore.getState().setActiveSession(session_id)
       }
 
-      // Then add message (UI will now be watching the correct session)
+      // Add user message with generated ID
+      const userMessageId = `user-${Date.now()}`
       addMessage(session_id, {
-        id: message_id,
+        id: userMessageId,
         role: 'user',
         content,
         created_at: new Date().toISOString()
+      })
+
+      // Add assistant message with ID from backend (will be updated by SSE)
+      addMessage(session_id, {
+        id: assistantMessageId,
+        role: 'assistant',
+        content: '',
+        agent_type: 'master',
+        created_at: created_at || new Date().toISOString()
       })
 
       if (onStream) {
