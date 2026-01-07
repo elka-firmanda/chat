@@ -145,6 +145,8 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
   const currentDelayRef = useRef(INITIAL_RETRY_DELAY)
   const lastEventIdRef = useRef<string | null>(null)
   const previousSessionIdRef = useRef<string | null>(null)
+  const optionsRef = useRef(options)
+  optionsRef.current = options
 
   const cleanupEventSource = useCallback(() => {
     if (eventSourceRef.current) {
@@ -164,11 +166,11 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
 
     heartbeatTimeoutRef.current = setTimeout(() => {
       if (es.readyState === EventSource.OPEN) {
-        options.onHeartbeat?.()
+        optionsRef.current.onHeartbeat?.()
         setupHeartbeat(es)
       }
     }, HEARTBEAT_INTERVAL)
-  }, [options])
+  }, [])
 
   const handleSuccessfulConnection = useCallback((es: EventSource, retryCount: number) => {
     setIsConnected(true)
@@ -182,8 +184,8 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
     reconnectAttemptsRef.current = 0
     currentDelayRef.current = INITIAL_RETRY_DELAY
     setupHeartbeat(es)
-    options.onReconnectSuccess?.({ retryCount })
-  }, [setupHeartbeat, options])
+    optionsRef.current.onReconnectSuccess?.({ retryCount })
+  }, [setupHeartbeat])
 
   const attemptReconnect = useCallback(() => {
     if (!sessionId) return
@@ -207,7 +209,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
     reconnectAttemptsRef.current = retryCount
     currentDelayRef.current = calculateNextDelay(currentDelayRef.current)
 
-    options.onReconnectAttempt?.({ retryCount, delay })
+    optionsRef.current.onReconnectAttempt?.({ retryCount, delay })
 
     reconnectTimeoutRef.current = setTimeout(() => {
       const es = chatApi.stream(sessionId, lastEventIdRef.current || undefined)
@@ -228,7 +230,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         if (e.lastEventId) {
           lastEventIdRef.current = e.lastEventId
         }
-        options.onThought?.(data)
+        optionsRef.current.onThought?.(data)
       })
 
       es.addEventListener('step_update', (e) => {
@@ -236,7 +238,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         if (e.lastEventId) {
           lastEventIdRef.current = e.lastEventId
         }
-        options.onStepUpdate?.(data)
+        optionsRef.current.onStepUpdate?.(data)
       })
 
       es.addEventListener('step_progress', (e) => {
@@ -244,7 +246,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         if (e.lastEventId) {
           lastEventIdRef.current = e.lastEventId
         }
-        options.onStepProgress?.(data)
+        optionsRef.current.onStepProgress?.(data)
       })
 
       es.addEventListener('memory_update', (e) => {
@@ -252,7 +254,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         if (e.lastEventId) {
           lastEventIdRef.current = e.lastEventId
         }
-        options.onMemoryUpdate?.(data)
+        optionsRef.current.onMemoryUpdate?.(data)
       })
 
       es.addEventListener('node_added', (e) => {
@@ -260,7 +262,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         if (e.lastEventId) {
           lastEventIdRef.current = e.lastEventId
         }
-        options.onNodeAdded?.(data)
+        optionsRef.current.onNodeAdded?.(data)
       })
 
       es.addEventListener('node_updated', (e) => {
@@ -268,7 +270,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         if (e.lastEventId) {
           lastEventIdRef.current = e.lastEventId
         }
-        options.onNodeUpdated?.(data)
+        optionsRef.current.onNodeUpdated?.(data)
       })
 
       es.addEventListener('timeline_update', (e) => {
@@ -276,7 +278,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         if (e.lastEventId) {
           lastEventIdRef.current = e.lastEventId
         }
-        options.onTimelineUpdate?.(data)
+        optionsRef.current.onTimelineUpdate?.(data)
       })
 
       es.addEventListener('message_chunk', (e) => {
@@ -284,7 +286,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         if (e.lastEventId) {
           lastEventIdRef.current = e.lastEventId
         }
-        options.onMessageChunk?.(data)
+        optionsRef.current.onMessageChunk?.(data)
       })
 
       es.addEventListener('error', (e: Event) => {
@@ -319,7 +321,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
           }
           setError(data.error.message)
 
-          console.group('🚨 Error occurred (check for details)')
+          console.group('SSE error event')
           console.error('Error Type:', data.error.error_type)
           console.error('Message:', data.error.message)
           console.error('Timestamp:', data.error.timestamp)
@@ -332,13 +334,13 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
           }
           console.groupEnd()
 
-          options.onError?.(data)
+          optionsRef.current.onError?.(data)
         } catch (parseError) {
           const legacyData = JSON.parse(event.data) as { message: string; retry_count: number }
           setError(legacyData.message)
           console.error('Error parsing SSE event:', parseError)
           console.error('Raw error data:', legacyData)
-          options.onError?.({
+          optionsRef.current.onError?.({
             error: {
               error_type: 'unknown_error',
               message: legacyData.message,
@@ -358,7 +360,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
           max_retries: number
           delay: number
         }
-        options.onRetry?.(data)
+        optionsRef.current.onRetry?.(data)
       })
 
       es.addEventListener('intervention', (e) => {
@@ -366,7 +368,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
           action: string
           error: Record<string, unknown> | null
         }
-        options.onIntervention?.(data)
+        optionsRef.current.onIntervention?.(data)
       })
 
       es.addEventListener('complete', (e) => {
@@ -376,7 +378,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         }
         setIsConnected(false)
         cleanupEventSource()
-        options.onComplete?.(data)
+        optionsRef.current.onComplete?.(data)
       })
 
       es.onerror = (err) => {
@@ -387,7 +389,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         attemptReconnect()
       }
     }, delay)
-  }, [sessionId, options, cleanupEventSource, handleSuccessfulConnection])
+  }, [sessionId, cleanupEventSource, handleSuccessfulConnection])
 
   const manualReconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -427,7 +429,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         lastEventIdRef.current = e.lastEventId
         setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
       }
-      options.onThought?.(data)
+      optionsRef.current.onThought?.(data)
     })
 
     es.addEventListener('step_update', (e) => {
@@ -436,7 +438,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         lastEventIdRef.current = e.lastEventId
         setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
       }
-      options.onStepUpdate?.(data)
+      optionsRef.current.onStepUpdate?.(data)
     })
 
     es.addEventListener('step_progress', (e) => {
@@ -445,7 +447,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         lastEventIdRef.current = e.lastEventId
         setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
       }
-      options.onStepProgress?.(data)
+      optionsRef.current.onStepProgress?.(data)
     })
 
     es.addEventListener('memory_update', (e) => {
@@ -454,7 +456,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         lastEventIdRef.current = e.lastEventId
         setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
       }
-      options.onMemoryUpdate?.(data)
+      optionsRef.current.onMemoryUpdate?.(data)
     })
 
     es.addEventListener('node_added', (e) => {
@@ -463,7 +465,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         lastEventIdRef.current = e.lastEventId
         setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
       }
-      options.onNodeAdded?.(data)
+      optionsRef.current.onNodeAdded?.(data)
     })
 
     es.addEventListener('node_updated', (e) => {
@@ -472,7 +474,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         lastEventIdRef.current = e.lastEventId
         setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
       }
-      options.onNodeUpdated?.(data)
+      optionsRef.current.onNodeUpdated?.(data)
     })
 
     es.addEventListener('timeline_update', (e) => {
@@ -481,7 +483,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         lastEventIdRef.current = e.lastEventId
         setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
       }
-      options.onTimelineUpdate?.(data)
+      optionsRef.current.onTimelineUpdate?.(data)
     })
 
     es.addEventListener('message_chunk', (e) => {
@@ -490,73 +492,73 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         lastEventIdRef.current = e.lastEventId
         setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
       }
-      options.onMessageChunk?.(data)
+      optionsRef.current.onMessageChunk?.(data)
     })
 
-      es.addEventListener('error', (e: Event) => {
-        const event = e as MessageEvent
-        try {
-          const data = JSON.parse(event.data) as {
-            error: {
-              error_type: string
-              message: string
-              timestamp: string
-              retry_count: number
-              max_retries: number
-              can_retry: boolean
-            }
-            step_info?: {
-              type: string
-              description: string
-              step_number: number
-            }
-            intervention_options: {
-              retry: boolean
-              skip: boolean
-              abort: boolean
-            }
-            user_friendly?: {
-              title: string
-              description: string
-              suggestion: string
-              severity: string
-            }
-            suggested_actions?: string[]
+    es.addEventListener('error', (e: Event) => {
+      const event = e as MessageEvent
+      try {
+        const data = JSON.parse(event.data) as {
+          error: {
+            error_type: string
+            message: string
+            timestamp: string
+            retry_count: number
+            max_retries: number
+            can_retry: boolean
           }
-          setError(data.error.message)
-
-          console.group('🚨 Error occurred (check for details)')
-          console.error('Error Type:', data.error.error_type)
-          console.error('Message:', data.error.message)
-          console.error('Timestamp:', data.error.timestamp)
-          console.error('Retry:', `${data.error.retry_count}/${data.error.max_retries}`)
-          if (data.user_friendly) {
-            console.log('User Friendly:', data.user_friendly)
+          step_info?: {
+            type: string
+            description: string
+            step_number: number
           }
-          if (data.suggested_actions) {
-            console.log('Suggested Actions:', data.suggested_actions)
+          intervention_options: {
+            retry: boolean
+            skip: boolean
+            abort: boolean
           }
-          console.groupEnd()
-
-          options.onError?.(data)
-        } catch (parseError) {
-          const legacyData = JSON.parse(event.data) as { message: string; retry_count: number }
-          setError(legacyData.message)
-          console.error('Error parsing SSE event:', parseError)
-          console.error('Raw error data:', legacyData)
-          options.onError?.({
-            error: {
-              error_type: 'unknown_error',
-              message: legacyData.message,
-              timestamp: new Date().toISOString(),
-              retry_count: legacyData.retry_count,
-              max_retries: 3,
-              can_retry: legacyData.retry_count < 3,
-            },
-            intervention_options: { retry: true, skip: true, abort: true },
-          })
+          user_friendly?: {
+            title: string
+            description: string
+            suggestion: string
+            severity: string
+          }
+          suggested_actions?: string[]
         }
-      })
+        setError(data.error.message)
+
+        console.group('SSE error event')
+        console.error('Error Type:', data.error.error_type)
+        console.error('Message:', data.error.message)
+        console.error('Timestamp:', data.error.timestamp)
+        console.error('Retry:', `${data.error.retry_count}/${data.error.max_retries}`)
+        if (data.user_friendly) {
+          console.log('User Friendly:', data.user_friendly)
+        }
+        if (data.suggested_actions) {
+          console.log('Suggested Actions:', data.suggested_actions)
+        }
+        console.groupEnd()
+
+        optionsRef.current.onError?.(data)
+      } catch (parseError) {
+        const legacyData = JSON.parse(event.data) as { message: string; retry_count: number }
+        setError(legacyData.message)
+        console.error('Error parsing SSE event:', parseError)
+        console.error('Raw error data:', legacyData)
+        optionsRef.current.onError?.({
+          error: {
+            error_type: 'unknown_error',
+            message: legacyData.message,
+            timestamp: new Date().toISOString(),
+            retry_count: legacyData.retry_count,
+            max_retries: 3,
+            can_retry: legacyData.retry_count < 3,
+          },
+          intervention_options: { retry: true, skip: true, abort: true },
+        })
+      }
+    })
 
     es.addEventListener('retry', (e) => {
       const data = JSON.parse(e.data) as {
@@ -564,7 +566,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         max_retries: number
         delay: number
       }
-      options.onRetry?.(data)
+      optionsRef.current.onRetry?.(data)
     })
 
     es.addEventListener('intervention', (e) => {
@@ -572,7 +574,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
         action: string
         error: Record<string, unknown> | null
       }
-      options.onIntervention?.(data)
+      optionsRef.current.onIntervention?.(data)
     })
 
     es.addEventListener('complete', (e) => {
@@ -582,7 +584,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
       }
       setIsConnected(false)
       cleanupEventSource()
-      options.onComplete?.(data)
+      optionsRef.current.onComplete?.(data)
     })
 
     es.onerror = (err) => {
@@ -600,7 +602,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
       }
       setIsConnected(false)
     }
-  }, [sessionId, options, cleanupEventSource, attemptReconnect, handleSuccessfulConnection])
+  }, [sessionId, cleanupEventSource, attemptReconnect, handleSuccessfulConnection])
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
