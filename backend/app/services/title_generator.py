@@ -7,8 +7,9 @@ based on the user's message content.
 
 import logging
 from typing import Optional
-from app.llm.providers import LLMProviderFactory, BaseLLMProvider
-from app.config.config_manager import get_config
+
+from app.config.config_manager import get_config, config_manager
+from app.services.llm import LLMService
 
 logger = logging.getLogger(__name__)
 
@@ -31,42 +32,27 @@ Examples:
 Generate only the title, no explanation or punctuation at the end."""
 
 
-TITLE_GENERATION_USER_TEMPLATE = """Generate a title for this conversation:
-
-User's message: {message}
-
-Title:"""
-
-
 class TitleGenerator:
     """Service for generating chat session titles using LLMs."""
 
     def __init__(self):
-        self._provider: Optional[BaseLLMProvider] = None
-        self._provider_initialized = False
+        self._llm_service: Optional[LLMService] = None
+        self._initialized = False
 
-    def _get_provider(self) -> Optional[BaseLLMProvider]:
-        """Lazy initialization of LLM provider for title generation."""
-        if self._provider_initialized:
-            return self._provider
+    def _get_llm_service(self) -> Optional[LLMService]:
+        """Lazy initialization of LLM service for title generation."""
+        if self._initialized:
+            return self._llm_service
 
         try:
-            from app.config.config_manager import config_manager
-
             config = get_config()
             master_config = config.agents.master
             api_keys = config_manager.get_api_keys()
 
             if master_config.provider and getattr(api_keys, master_config.provider):
-                self._provider = LLMProviderFactory.create(
-                    provider=master_config.provider,
-                    model=master_config.model,
-                    api_key=getattr(api_keys, master_config.provider),
-                    max_tokens=master_config.max_tokens,
-                    temperature=master_config.temperature,
-                )
-                self._provider_initialized = True
-                return self._provider
+                self._llm_service = LLMService(master_config, config_manager)
+                self._initialized = True
+                return self._llm_service
             else:
                 logger.warning(
                     "Cannot initialize title generator: missing provider config"
@@ -90,36 +76,29 @@ class TitleGenerator:
         if not user_message or not user_message.strip():
             return None
 
-        provider = self._get_provider()
-        if not provider:
+        llm_service = self._get_llm_service()
+        if not llm_service:
             return None
 
         try:
-            # Truncate very long messages to avoid excessive token usage
             truncated_message = user_message[:1000]
 
-            user_prompt = TITLE_GENERATION_USER_TEMPLATE.format(
-                message=truncated_message
-            )
+            user_prompt = f"""Generate a title for this conversation:
 
-            messages = [{"role": "user", "content": user_prompt}]
+User's message: {truncated_message}
 
-            response = await provider.complete(
-                messages=messages,
+Title:"""
+
+            title = await llm_service.chat_with_system(
+                message=user_prompt,
                 system_prompt=TITLE_GENERATION_SYSTEM_PROMPT,
-                temperature=0.3,  # Lower temperature for more consistent outputs
-                max_tokens=20,  # Short titles only
             )
 
-            if response and response.content:
-                title = response.content.strip()
-                # Ensure title is within reasonable bounds
+            if title:
+                title = title.strip().rstrip(".")
                 if title and len(title) <= 60:
-                    # Clean up any trailing punctuation
-                    title = title.rstrip(".")
-                    if title:
-                        logger.info(f"Generated title: '{title}'")
-                        return title
+                    logger.info(f"Generated title: '{title}'")
+                    return title
 
             return None
 
@@ -128,7 +107,6 @@ class TitleGenerator:
             return None
 
 
-# Singleton instance
 _title_generator: Optional[TitleGenerator] = None
 
 

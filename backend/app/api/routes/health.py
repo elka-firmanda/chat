@@ -1,8 +1,5 @@
-"""
-Health check endpoints.
-"""
+"""Health check endpoints."""
 
-import asyncio
 import time
 from typing import Any, Dict
 
@@ -10,7 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db, check_database_connection
-from app.config.config_manager import get_config
+from app.config.config_manager import get_config, config_manager
 
 
 router = APIRouter()
@@ -27,9 +24,9 @@ async def detailed_health_check() -> Dict[str, Any]:
 
     db_status = await check_database_connection()
 
-    llm_status = await check_llm_providers(config)
+    llm_status = await check_llm_providers()
 
-    tavily_status = await check_tavily_status(config)
+    tavily_status = await check_tavily_status()
 
     overall_status = determine_overall_status(db_status, llm_status, tavily_status)
 
@@ -43,44 +40,31 @@ async def detailed_health_check() -> Dict[str, Any]:
     }
 
 
-async def check_llm_providers(config: Any) -> Dict[str, Dict[str, Any]]:
-    from app.llm.providers import (
-        AnthropicProvider,
-        OpenAIProvider,
-        ProviderConfig,
-    )
+async def check_llm_providers() -> Dict[str, Dict[str, Any]]:
+    """Check LLM provider connectivity using LangChain."""
+    from langchain_anthropic import ChatAnthropic
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage
 
     providers_status = {}
-
-    from app.config.config_manager import config_manager
-
     api_keys = config_manager.get_api_keys()
+
     anthropic_key = api_keys.anthropic
     if anthropic_key:
         try:
-            anthropic_config = ProviderConfig(
-                provider="anthropic",
+            llm = ChatAnthropic(
                 model="claude-3-5-sonnet-20241022",
                 api_key=anthropic_key,
                 max_tokens=10,
             )
-            anthropic = AnthropicProvider(anthropic_config)
             start_time = time.perf_counter()
-
-            def sync_call():
-                return anthropic.client.messages.create(
-                    messages=[{"role": "user", "content": "test"}],
-                    model=anthropic_config.model,
-                    max_tokens=1,
-                )
-
-            await asyncio.get_event_loop().run_in_executor(None, sync_call)
+            await llm.ainvoke([HumanMessage(content="test")])
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             providers_status["anthropic"] = {
                 "status": "connected",
                 "latency_ms": round(latency_ms, 2),
-                "model": anthropic_config.model,
+                "model": "claude-3-5-sonnet-20241022",
                 "error": None,
             }
         except Exception as e:
@@ -101,28 +85,19 @@ async def check_llm_providers(config: Any) -> Dict[str, Dict[str, Any]]:
     openai_key = api_keys.openai
     if openai_key:
         try:
-            openai_config = ProviderConfig(
-                provider="openai",
+            llm = ChatOpenAI(
                 model="gpt-4o",
                 api_key=openai_key,
                 max_tokens=10,
             )
-            openai = OpenAIProvider(openai_config)
             start_time = time.perf_counter()
-
-            request = openai.client.chat.completions.create(
-                model=openai_config.model,
-                messages=[{"role": "user", "content": "test"}],
-                max_tokens=1,
-            )
-
-            await request
+            await llm.ainvoke([HumanMessage(content="test")])
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             providers_status["openai"] = {
                 "status": "connected",
                 "latency_ms": round(latency_ms, 2),
-                "model": openai_config.model,
+                "model": "gpt-4o",
                 "error": None,
             }
         except Exception as e:
@@ -143,10 +118,8 @@ async def check_llm_providers(config: Any) -> Dict[str, Dict[str, Any]]:
     return providers_status
 
 
-async def check_tavily_status(config: Any) -> Dict[str, Any]:
+async def check_tavily_status() -> Dict[str, Any]:
     import httpx
-
-    from app.config.config_manager import config_manager
 
     api_keys = config_manager.get_api_keys()
     tavily_key = api_keys.tavily
@@ -258,9 +231,6 @@ async def config_status():
 
 @router.get("/rate-limit")
 async def rate_limit_status():
-    """
-    Get rate limiting status and configuration.
-    """
     from app.utils.rate_limiter import get_rate_limiter
 
     limiter = get_rate_limiter()
@@ -281,8 +251,4 @@ async def rate_limit_status():
             else {},
         }
     else:
-        return {
-            "enabled": limiter.is_enabled(),
-            "endpoints": {},
-            "status": "using_defaults",
-        }
+        return {"enabled": False, "endpoints": {}}
