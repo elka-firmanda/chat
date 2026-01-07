@@ -36,3 +36,19 @@ class Message(BaseModel):
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatRequest(BaseModel):
+    """Request model for chat endpoint."""
+
+    message: str
+    session_id: str | None = None
+    deep_search: bool = False
+
+
+class ChatResponse(BaseModel):
+    """Response model for chat endpoint."""
+
+    session_id: str
+    message: Message
+    plan: list[PlanStep] | None = None

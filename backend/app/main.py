@@ -77,19 +77,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Warning: Could not cancel session tasks: {e}")
 
-    try:
-        from app.utils.streaming import event_manager
-
-        active_queues = event_manager.get_queue_count()
-        if active_queues > 0:
-            print(f"Closing {active_queues} active SSE event queues...")
-            for session_id in list(event_manager._queues.keys()):
-                await event_manager.close(session_id)
-                await save_working_memory_state(session_id)
-            print("All SSE event queues closed")
-    except Exception as e:
-        print(f"Warning: Could not close event queues: {e}")
-
     # Use the shutdown manager's complete shutdown (disposes engine, etc.)
     # This is the final cleanup step
     if _engine is not None:

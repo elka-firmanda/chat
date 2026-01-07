@@ -153,7 +153,6 @@ class ShutdownManager:
                     session_ids = list(event_manager._queues.keys())
 
                 for session_id in session_ids:
-                    # Emit shutdown event to notify clients
                     try:
                         await event_manager.emit_error(
                             session_id=session_id,
@@ -162,12 +161,15 @@ class ShutdownManager:
                             can_retry=False,
                         )
                     except Exception:
-                        pass  # Client may already be disconnected
+                        pass
 
-                    # Close the event queue
                     await event_manager.close(session_id)
 
                 logger.info("All SSE event queues closed")
+        except ImportError:
+            logger.debug(
+                "SSE event_manager not available (using EventSourceResponse pattern)"
+            )
         except Exception as e:
             logger.error(f"Error closing event queues: {e}")
 
@@ -292,14 +294,15 @@ async def save_working_memory_state(session_id: str) -> bool:
     try:
         from app.db.repositories.chat import ChatRepository
         from app.db.session import get_db_session
-        from app.utils.streaming import event_manager
 
-        async with get_db_session() as session:
-            repo = ChatRepository(session)
+        try:
+            from app.utils.streaming import event_manager
 
             memory_data = event_manager._queues.get(session_id)
             if memory_data:
                 await event_manager.close(session_id)
+        except ImportError:
+            pass
 
         logger.info(f"Saved working memory state for session {session_id}")
         return True
@@ -330,6 +333,8 @@ async def cancel_session_execution(session_id: str) -> bool:
 
             await em.close(session_id)
             event_manager_cancelled = True
+        except ImportError:
+            pass
         except Exception as e:
             logger.debug(f"Event manager cleanup for {session_id}: {e}")
 

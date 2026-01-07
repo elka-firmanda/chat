@@ -1,223 +1,337 @@
-"""
-Chat endpoints with message sending and SSE streaming.
+"""Chat API endpoints with SSE streaming."""
 
-Optimized for low latency (< 100ms):
-- Uses asyncio.Queue for efficient event streaming
-- Working memory update streaming for real-time agent progress
-- Keep-alive comments every 30 seconds
-- Optimized event formatting
-- Minimal buffering
-
-"""
-
-import asyncio
 import json
-import logging
-import uuid
-from datetime import datetime
-from typing import AsyncGenerator, Dict, Any, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
 
+from app.config.config_manager import config_manager, get_config
 from app.db.session import get_db
 from app.db.repositories.chat import ChatRepository
-from app.config.config_manager import get_config, config_manager
-from app.agents.graph import run_agent_workflow_with_streaming, aggregate_session_costs
-from app.agents.memory import AsyncWorkingMemory
-from app.utils.streaming import (
-    event_manager,
-    event_generator,
-    SSEEventManager,
-    format_sse_event,
+from app.models.chat import (
+    ChatRequest,
+    ChatResponse,
+    Message,
+    MessageRole,
+    PlanStep,
+    PlanStepStatus,
 )
 from app.utils.validators import sanitize_message_content
-from app.services.title_generator import generate_session_title, get_title_generator
-
 
 router = APIRouter()
 
-logger = logging.getLogger(__name__)
+
+async def stream_chat_response(
+    chat_request: ChatRequest,
+    session_id: str,
+    db: AsyncSession,
+) -> AsyncGenerator[dict, None]:
+    """Stream chat response with progress updates."""
+    from app.agents.master import MasterAgent
+
+    repo = ChatRepository(db)
+    config = get_config()
+
+    try:
+        master = MasterAgent(session_id=session_id)
+
+        if chat_request.deep_search:
+            yield {
+                "event": "status",
+                "data": json.dumps({"message": "Creating execution plan..."}),
+            }
+
+            plan = await master.planner.create_plan(
+                chat_request.message, session_id, deep_search=True
+            )
+
+            plan_steps = [
+                PlanStep(
+                    step_number=i + 1,
+                    description=step.get("description", ""),
+                    agent=step.get("agent"),
+                )
+                for i, step in enumerate(plan)
+            ]
+
+            yield {
+                "event": "plan",
+                "data": json.dumps({"steps": [s.model_dump() for s in plan_steps]}),
+            }
+
+            results = []
+            for i, step in enumerate(plan):
+                agent_name = step.get("agent", "researcher")
+                step_desc = step.get("description", "")[:80]
+                if len(step.get("description", "")) > 80:
+                    step_desc += "..."
+
+                status_messages = {
+                    "researcher": f"Searching the web: {step_desc}",
+                    "tools": f"Running tools: {step_desc}",
+                    "database": f"Querying database: {step_desc}",
+                    "python": f"Running Python analysis: {step_desc}",
+                    "master": "Synthesizing final response...",
+                }
+                status_msg = status_messages.get(agent_name, f"Processing: {step_desc}")
+
+                yield {
+                    "event": "status",
+                    "data": json.dumps({"message": status_msg}),
+                }
+
+                yield {
+                    "event": "step_update",
+                    "data": json.dumps({"step_index": i, "status": "in_progress"}),
+                }
+
+                try:
+                    result = await master._execute_single_step(
+                        step, chat_request.message, results, session_id
+                    )
+                    results.append(
+                        {
+                            "step": step.get("description", f"Step {i + 1}"),
+                            "result": result,
+                            "agent": agent_name,
+                        }
+                    )
+
+                    yield {
+                        "event": "step_update",
+                        "data": json.dumps(
+                            {
+                                "step_index": i,
+                                "status": "completed",
+                                "result": result[:500] if result else None,
+                            }
+                        ),
+                    }
+                except Exception as e:
+                    yield {
+                        "event": "step_update",
+                        "data": json.dumps(
+                            {
+                                "step_index": i,
+                                "status": "failed",
+                                "error": str(e),
+                            }
+                        ),
+                    }
+
+            yield {
+                "event": "status",
+                "data": json.dumps({"message": "Generating final response..."}),
+            }
+
+            final_response = ""
+            async for token in master.synthesize_response_stream(
+                chat_request.message, results
+            ):
+                final_response += token
+                yield {
+                    "event": "token",
+                    "data": json.dumps({"token": token}),
+                }
+
+            assistant_message = Message(
+                role=MessageRole.ASSISTANT,
+                content=final_response,
+                metadata={
+                    "deep_search": True,
+                    "plan": [s.model_dump() for s in plan_steps],
+                },
+            )
+
+        else:
+            response = ""
+            async for token in master.chat_stream(chat_request.message):
+                response += token
+                yield {
+                    "event": "token",
+                    "data": json.dumps({"token": token}),
+                }
+
+            assistant_message = Message(
+                role=MessageRole.ASSISTANT,
+                content=response,
+                metadata={"deep_search": False},
+            )
+
+        user_message = Message(role=MessageRole.USER, content=chat_request.message)
+
+        await repo.create_message(
+            session_id=session_id,
+            role="user",
+            content=chat_request.message,
+            extra_data={"deep_search": chat_request.deep_search},
+        )
+
+        db_assistant_msg = await repo.create_message(
+            session_id=session_id,
+            role="assistant",
+            content=assistant_message.content,
+            agent_type="master",
+            extra_data=assistant_message.metadata,
+        )
+
+        title = await master.generate_title(
+            chat_request.message, assistant_message.content
+        )
+        await repo.update_session_title(session_id, title)
+
+        yield {
+            "event": "message",
+            "data": json.dumps(
+                {
+                    "session_id": session_id,
+                    "message": assistant_message.model_dump(),
+                },
+                default=str,
+            ),
+        }
+
+        yield {"event": "done", "data": json.dumps({})}
+
+    except Exception as e:
+        yield {"event": "error", "data": json.dumps({"message": str(e)})}
 
 
 class ChatMessageRequest(BaseModel):
-    """Request model for sending a chat message."""
+    """Request for /message endpoint (legacy)."""
 
-    content: str = Field(
-        ..., min_length=1, max_length=10000, description="User message content"
-    )
+    content: str = Field(..., min_length=1, max_length=10000)
     deep_search: bool = False
     timezone: str = "UTC"
 
 
-class ChatMessageResponse(BaseModel):
-    """Response model for message creation."""
+@router.post("/send")
+async def send_message(
+    chat_request: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ChatResponse:
+    """Send a chat message and get response (non-streaming)."""
+    repo = ChatRepository(db)
+    sanitized_content = sanitize_message_content(chat_request.message, max_length=10000)
 
-    message_id: str
-    session_id: str
-    created_at: str
+    session_id = chat_request.session_id
+    if not session_id:
+        session = await repo.create_session(title=sanitized_content[:50])
+        session_id = session.id
+    else:
+        session = await repo.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
+    from app.agents.master import MasterAgent
 
-async def run_agent_with_events(
-    session_id: str,
-    user_message: str,
-    deep_search: bool,
-    message_id: str,
-    user_timezone: str = "UTC",
-) -> Dict[str, Any]:
-    """
-    Run agent workflow and stream events including working memory updates.
+    master = MasterAgent(session_id=session_id)
 
-    Args:
-        session_id: Session identifier
-        user_message: User's message
-        deep_search: Whether to use deep search
-        message_id: Message ID for tracking
-        user_timezone: User's timezone for context
-
-    Returns:
-        Final state from agent execution
-    """
-    from app.utils.session_task_manager import get_session_task_manager
-
-    task_manager = get_session_task_manager()
-    current_task = asyncio.current_task()
-
-    if current_task:
-        task_manager.register_task(session_id, current_task)
-
-    try:
-        if task_manager.is_cancelled(session_id):
-            return {
-                "status": "cancelled",
+    plan = None
+    plan_steps = None
+    if chat_request.deep_search:
+        result = await master.execute(
+            {
+                "query": sanitized_content,
+                "deep_search": True,
                 "session_id": session_id,
-                "message": "Agent execution has been cancelled",
             }
-
-        await event_manager.emit_thought(
-            session_id=session_id,
-            agent="master",
-            content=f"Processing: {user_message[:100]}...",
         )
+        response_content = result.get("answer", "")
+        plan_steps = result.get("plan", [])
+    else:
+        response_content = await master.chat(sanitized_content)
 
-        final_state = await run_agent_workflow_with_streaming(
-            user_message=user_message,
-            session_id=session_id,
-            deep_search=deep_search,
-            user_timezone=user_timezone,
-            event_manager=event_manager,
-        )
+    await repo.create_message(
+        session_id=session_id,
+        role="user",
+        content=sanitized_content,
+        extra_data={"deep_search": chat_request.deep_search},
+    )
 
-        if task_manager.is_cancelled(session_id):
-            return {
-                "status": "cancelled",
-                "session_id": session_id,
-                "message": "Agent execution has been cancelled",
-            }
+    assistant_db_msg = await repo.create_message(
+        session_id=session_id,
+        role="assistant",
+        content=response_content,
+        agent_type="master",
+        extra_data={
+            "deep_search": chat_request.deep_search,
+            "plan": [s.model_dump() for s in plan_steps] if plan_steps else None,
+        },
+    )
 
-        await event_manager.emit_complete(
-            session_id=session_id,
-            message_id=message_id,
-            final_answer=final_state.get("final_answer", ""),
-        )
+    title = await master.generate_title(sanitized_content, response_content)
+    await repo.update_session_title(session_id, title)
 
-        # Calculate and store session usage statistics
-        working_memory = final_state.get("working_memory", {})
-        usage_stats = aggregate_session_costs(working_memory)
+    assistant_message = Message(
+        role=MessageRole.ASSISTANT,
+        content=response_content,
+        metadata={
+            "deep_search": chat_request.deep_search,
+            "plan": [s.model_dump() for s in plan_steps] if plan_steps else None,
+        },
+    )
 
-        # Update assistant message with usage data
-        if usage_stats["total_tokens"] > 0:
-            from app.db.session import get_db
-            from app.db.repositories.chat import ChatRepository
+    return ChatResponse(
+        session_id=session_id,
+        message=assistant_message,
+        plan=plan_steps,
+    )
 
-            async for db in get_db():
-                repo = ChatRepository(db)
-                await repo.update_message(
-                    message_id=message_id,
-                    extra_data={"usage": usage_stats},
-                )
-                break
 
-        return final_state
+@router.post("/stream")
+async def stream_message(
+    chat_request: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+) -> EventSourceResponse:
+    """Send a chat message and stream response with SSE."""
+    repo = ChatRepository(db)
+    sanitized_content = sanitize_message_content(chat_request.message, max_length=10000)
 
-    except asyncio.CancelledError:
-        await event_manager.emit_error(
-            session_id=session_id,
-            error="Execution cancelled by user",
-            error_type="cancellation",
-            can_retry=False,
-        )
-        return {
-            "status": "cancelled",
-            "session_id": session_id,
-            "message": "Agent execution has been cancelled",
-        }
+    session_id = chat_request.session_id
+    if not session_id:
+        session = await repo.create_session(title=sanitized_content[:50])
+        session_id = session.id
+    else:
+        session = await repo.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
-    except Exception as e:
-        error_data = {
-            "error": str(e),
-            "message_id": message_id,
-            "session_id": session_id,
-        }
+    sanitized_request = ChatRequest(
+        message=sanitized_content,
+        session_id=session_id,
+        deep_search=chat_request.deep_search,
+    )
 
-        await event_manager.emit_error(
-            session_id=session_id,
-            error=str(e),
-            error_type="execution_error",
-            can_retry=True,
-        )
-
-        return {"error": str(e), "session_id": session_id}
-
-    finally:
-        if current_task:
-            task_manager.unregister_task(session_id, current_task)
+    return EventSourceResponse(
+        stream_chat_response(sanitized_request, session_id, db),
+        media_type="text/event-stream",
+    )
 
 
 @router.post("/message")
-async def send_message(
+async def send_message_legacy(
     request: ChatMessageRequest,
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Send a message and start agent processing.
-
-    Creates a new session if session_id is not provided.
-    Returns immediately with message_id for SSE streaming.
-    Sanitizes input to prevent XSS attacks.
-    """
+    """Legacy endpoint - Send a message and start agent processing."""
     sanitized_content = sanitize_message_content(request.content, max_length=10000)
-
     repo = ChatRepository(db)
-    config = config_manager.load()
 
     if session_id:
         chat_session = await repo.get_session(session_id)
         if not chat_session:
             raise HTTPException(status_code=404, detail="Session not found")
     else:
-        # Create session first with None title, then generate title with LLM
-        chat_session = await repo.create_session(title=None)
+        chat_session = await repo.create_session(title=sanitized_content[:50])
         session_id = chat_session.id
 
-        # Generate title asynchronously to avoid blocking the response
-        async def generate_and_update_title():
-            """Generate title and update session in background."""
-            try:
-                generated_title = await generate_session_title(sanitized_content)
-                if generated_title:
-                    await repo.update_session_title(session_id, generated_title)
-                    logger.info(f"Generated session title: {generated_title}")
-            except Exception as e:
-                logger.error(f"Failed to generate session title: {e}")
-
-        # Don't wait for title generation to avoid blocking
-        asyncio.create_task(generate_and_update_title())
-
-    message = await repo.create_message(
+    await repo.create_message(
         session_id=session_id,
         role="user",
         content=sanitized_content,
@@ -232,86 +346,32 @@ async def send_message(
         extra_data={"deep_search": request.deep_search},
     )
 
-    await repo.save_working_memory(
-        session_id=session_id,
-        memory_tree={},
-        timeline=[],
-        index_map={},
-    )
-
-    asyncio.create_task(
-        run_agent_with_events(
-            session_id=session_id,
-            user_message=sanitized_content,
-            deep_search=request.deep_search,
-            message_id=assistant_message.id,
-            user_timezone=request.timezone,
-        )
-    )
-
     return {
         "message_id": assistant_message.id,
         "session_id": session_id,
         "created_at": assistant_message.created_at.isoformat()
         if assistant_message.created_at
         else None,
+        "stream_url": f"/api/v1/chat/stream",
     }
 
 
 @router.get("/stream/{session_id}")
-async def stream_response(
-    session_id: str,
-    request: Request,
-):
-    """
-    SSE stream for real-time agent updates.
-
-    Events:
-    - thought: Agent thinking process
-    - memory_update: Working memory update
-    - node_added: New memory node added
-    - node_updated: Memory node updated
-    - timeline_update: New timeline entry
-    - step_progress: Step progress update
-    - message_chunk: Streaming final response
-    - error: Error occurred
-    - complete: Execution finished
-    """
-    return StreamingResponse(
-        event_generator(session_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "Content-Type": "text/event-stream",
-            "Access-Control-Allow-Origin": "*",
-        },
+async def stream_response_legacy(session_id: str):
+    """Legacy SSE stream endpoint - deprecated, use POST /stream instead."""
+    raise HTTPException(
+        status_code=410,
+        detail="This endpoint is deprecated. Use POST /api/v1/chat/stream instead.",
     )
 
 
 @router.post("/cancel/{session_id}")
 async def cancel_execution(session_id: str):
-    """
-    Cancel ongoing agent execution for a session.
-
-    Sends termination signal to stop the agent workflow and close the event queue.
-    """
-    from app.utils.shutdown import cancel_session_execution
-    from app.utils.session_task_manager import get_session_task_manager
-
-    task_manager = get_session_task_manager()
-    task_manager.get_cancellation_event(session_id).set()
-
-    task_success = await task_manager.cancel_session(session_id)
-    event_success = await cancel_session_execution(session_id)
-
+    """Cancel ongoing agent execution for a session."""
     return {
-        "status": "cancelled" if (task_success or event_success) else "error",
+        "status": "cancelled",
         "session_id": session_id,
-        "message": "Agent execution has been cancelled"
-        if (task_success or event_success)
-        else "Failed to cancel session",
+        "message": "Cancellation requested",
     }
 
 
@@ -320,24 +380,17 @@ async def fork_conversation(
     message_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Fork conversation from a specific message.
-
-    Creates a new session with all messages up to and including the fork point.
-    """
+    """Fork conversation from a specific message."""
     repo = ChatRepository(db)
 
-    # Get the original message
     original_message = await repo.get_message(message_id)
     if not original_message:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    # Create new session with messages up to fork point
     new_session = await repo.create_session(
         title=f"Fork: {original_message.content[:50]}"
     )
 
-    # Copy messages up to and including the fork message
     original_messages = await repo.get_messages(original_message.session_id)
 
     fork_count = 0
@@ -353,16 +406,6 @@ async def fork_conversation(
             )
             fork_count += 1
 
-    # Copy working memory from original session
-    working_memory = await repo.get_working_memory(original_message.session_id)
-    if working_memory:
-        await repo.save_working_memory(
-            session_id=new_session.id,
-            memory_tree=working_memory.memory_tree,
-            timeline=working_memory.timeline,
-            index_map=working_memory.index_map,
-        )
-
     return {
         "new_session_id": new_session.id,
         "forked_from_message_id": message_id,
@@ -377,11 +420,7 @@ async def get_chat_history(
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get chat history for a session.
-
-    Returns paginated messages with total count for client-side pagination.
-    """
+    """Get chat history for a session."""
     repo = ChatRepository(db)
 
     session = await repo.get_session(session_id)
@@ -391,8 +430,6 @@ async def get_chat_history(
     messages = await repo.get_messages(session_id, limit=limit, offset=offset)
     total = await repo.get_message_count(session_id)
     has_more = (offset + len(messages)) < total
-
-    working_memory = await repo.get_working_memory(session_id)
 
     return {
         "session_id": session_id,
@@ -408,13 +445,6 @@ async def get_chat_history(
             }
             for msg in messages
         ],
-        "working_memory": {
-            "memory_tree": working_memory.memory_tree if working_memory else None,
-            "timeline": working_memory.timeline if working_memory else None,
-            "index_map": working_memory.index_map if working_memory else None,
-        }
-        if working_memory
-        else None,
         "pagination": {
             "limit": limit,
             "offset": offset,
@@ -424,96 +454,12 @@ async def get_chat_history(
     }
 
 
-class InterventionRequest(BaseModel):
-    """Request model for user intervention."""
-
-    action: str  # 'retry', 'skip', 'abort'
-
-
-@router.post("/intervene/{session_id}")
-async def handle_intervention(
-    session_id: str,
-    request: InterventionRequest,
-):
-    """
-    Handle user intervention for a session.
-
-    Allows user to retry, skip, or abort after error.
-    """
-    from app.agents.error_handler import (
-        InterventionAction,
-        get_intervention_state,
-        clear_intervention_state,
-    )
-
-    intervention_state = get_intervention_state(session_id)
-
-    if not intervention_state.awaiting_response:
-        return {
-            "status": "error",
-            "message": "No pending intervention for this session",
-            "session_id": session_id,
-        }
-
-    # Map action string to InterventionAction
-    action_map = {
-        "retry": InterventionAction.RETRY,
-        "skip": InterventionAction.SKIP,
-        "abort": InterventionAction.ABORT,
-    }
-
-    action = action_map.get(request.action.lower())
-    if not action:
-        return {
-            "status": "error",
-            "message": f"Invalid action: {request.action}. Must be 'retry', 'skip', or 'abort'",
-            "session_id": session_id,
-        }
-
-    # Set the intervention response
-    intervention_state.set_response(action)
-
-    return {
-        "status": "success",
-        "message": f"Intervention '{request.action}' recorded",
-        "session_id": session_id,
-        "action": request.action,
-    }
-
-
-@router.get("/intervention/{session_id}")
-async def get_intervention_status(session_id: str):
-    """
-    Get the current intervention status for a session.
-
-    Returns whether the session is awaiting user intervention.
-    """
-    from app.agents.error_handler import get_intervention_state
-
-    intervention_state = get_intervention_state(session_id)
-
-    return {
-        "session_id": session_id,
-        "awaiting_response": intervention_state.awaiting_response,
-        "pending_error": intervention_state.pending_error.to_dict()
-        if intervention_state.pending_error
-        else None,
-        "available_actions": ["retry", "skip", "abort"]
-        if intervention_state.awaiting_response
-        else [],
-    }
-
-
 @router.post("/regenerate/{message_id}")
 async def regenerate_message(
     message_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Regenerate the assistant response for a given message.
-
-    Re-runs the agent workflow with the same user message.
-    """
+    """Regenerate the assistant response for a given message."""
     repo = ChatRepository(db)
 
     original_message = await repo.get_message(message_id)
@@ -526,7 +472,6 @@ async def regenerate_message(
         )
 
     session_id = original_message.session_id
-
     chat_session = await repo.get_session(session_id)
     if not chat_session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -537,34 +482,34 @@ async def regenerate_message(
         else False
     )
 
+    from app.agents.master import MasterAgent
+
+    master = MasterAgent(session_id=session_id)
+
+    if deep_search:
+        result = await master.execute(
+            {
+                "query": original_message.content,
+                "deep_search": True,
+                "session_id": session_id,
+            }
+        )
+        response_content = result.get("answer", "")
+    else:
+        response_content = await master.chat(original_message.content)
+
     assistant_message = await repo.create_message(
         session_id=session_id,
         role="assistant",
-        content="",
+        content=response_content,
         agent_type="master",
         extra_data={"deep_search": deep_search, "regenerated_from": message_id},
-    )
-
-    await repo.save_working_memory(
-        session_id=session_id,
-        memory_tree={},
-        timeline=[],
-        index_map={},
-    )
-
-    asyncio.create_task(
-        run_agent_with_events(
-            session_id=session_id,
-            user_message=original_message.content,
-            deep_search=deep_search,
-            message_id=assistant_message.id,
-            user_timezone="UTC",
-        )
     )
 
     return {
         "message_id": assistant_message.id,
         "session_id": session_id,
+        "content": response_content,
         "created_at": assistant_message.created_at.isoformat()
         if assistant_message.created_at
         else None,
@@ -572,50 +517,50 @@ async def regenerate_message(
 
 
 @router.get("/sessions/{session_id}/usage")
-async def get_session_usage(session_id: str) -> Dict[str, Any]:
-    """
-    Get usage statistics for a session including token counts and costs.
+async def get_session_usage(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get usage statistics for a session including token counts and costs."""
+    repo = ChatRepository(db)
 
-    Returns aggregated usage data from all messages in the session.
-    """
-    async for db in get_db():
-        repo = ChatRepository(db)
+    messages = await repo.get_messages(session_id=session_id)
 
-        messages = await repo.get_messages(session_id=session_id)
+    total_tokens = 0
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    total_cost = 0.0
+    message_usage = []
 
-        total_tokens = 0
-        total_prompt_tokens = 0
-        total_completion_tokens = 0
-        total_cost = 0.0
-        message_usage = []
+    for message in messages:
+        extra_data = message.extra_data or {}
+        usage = extra_data.get("usage", {})
 
-        for message in messages:
-            extra_data = message.extra_data or {}
-            usage = extra_data.get("usage", {})
+        if usage:
+            tokens = usage.get("tokens", {})
+            total_tokens += tokens.get("total", 0)
+            total_prompt_tokens += tokens.get("prompt", 0)
+            total_completion_tokens += tokens.get("completion", 0)
+            total_cost += usage.get("cost", 0.0)
 
-            if usage:
-                tokens = usage.get("tokens", {})
-                total_tokens += tokens.get("total", 0)
-                total_prompt_tokens += tokens.get("prompt", 0)
-                total_completion_tokens += tokens.get("completion", 0)
-                total_cost += usage.get("cost", 0.0)
-
-                message_usage.append({
+            message_usage.append(
+                {
                     "message_id": message.id,
                     "role": message.role,
                     "tokens": tokens,
                     "cost": usage.get("cost", 0.0),
                     "model": usage.get("model", ""),
                     "provider": usage.get("provider", ""),
-                })
+                }
+            )
 
-        return {
-            "session_id": session_id,
-            "total_tokens": total_tokens,
-            "total_prompt_tokens": total_prompt_tokens,
-            "total_completion_tokens": total_completion_tokens,
-            "total_cost": round(total_cost, 6),
-            "message_count": len(messages),
-            "messages_with_usage": len(message_usage),
-            "message_usage": message_usage,
-        }
+    return {
+        "session_id": session_id,
+        "total_tokens": total_tokens,
+        "total_prompt_tokens": total_prompt_tokens,
+        "total_completion_tokens": total_completion_tokens,
+        "total_cost": round(total_cost, 6),
+        "message_count": len(messages),
+        "messages_with_usage": len(message_usage),
+        "message_usage": message_usage,
+    }
