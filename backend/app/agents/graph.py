@@ -1116,7 +1116,11 @@ async def execute_steps_parallel(
 
 
 def route_step(state: AgentState) -> str:
-    """Route to the next agent based on current step type."""
+    """Determine which agent to route to based on current step."""
+    final_answer = state.get("final_answer", "")
+    if final_answer:
+        return END
+
     current_plan = state.get("current_plan", [])
     active_step = state.get("active_step", 0)
     requires_replan = state.get("requires_replan", False)
@@ -1124,16 +1128,16 @@ def route_step(state: AgentState) -> str:
     skip_planner = state.get("skip_planner", False)
 
     if skip_planner:
-        return "master"
+        return END
 
     if requires_replan:
         return "planner"
 
     if not current_plan or active_step >= len(current_plan):
-        return "master"
+        return END
 
-    if not deep_search or not current_plan:
-        return "master"
+    if not deep_search:
+        return END
 
     current_step = current_plan[active_step]
     step_type = current_step.get("type", StepType.THINK.value)
@@ -1144,11 +1148,11 @@ def route_step(state: AgentState) -> str:
         StepType.DATABASE.value: "database",
         StepType.CALCULATE.value: "tools",
         StepType.CHART.value: "tools",
-        StepType.REVIEW.value: "master",
-        StepType.THINK.value: "master",
+        StepType.REVIEW.value: END,
+        StepType.THINK.value: END,
     }
 
-    return routing.get(step_type, "master")
+    return routing.get(step_type, END)
 
 
 def should_continue(state: AgentState) -> str:
@@ -1182,11 +1186,11 @@ def create_agent_graph() -> Any:
         "master",
         route_step,
         {
-            "master": "master",
             "planner": "planner",
             "researcher": "researcher",
             "tools": "tools",
             "database": "database",
+            END: END,
         },
     )
 
