@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, cast
 from dotenv import load_dotenv
 from functools import lru_cache
 
-from .schema import Config, ConfigUpdate
+from .schema import Config, ConfigUpdate, APIKeys
 from .settings import settings
 
 
@@ -21,12 +21,21 @@ class ConfigManager:
         self._config: Optional[Config] = None
         self._config_cache: Optional[Config] = None
         self._config_mtime: float = 0
+        self._api_keys: Optional[APIKeys] = None
         self._load_env()
 
     def _load_env(self) -> None:
         """Load environment variables from .env file."""
-        if self.env_path.exists():
-            load_dotenv(self.env_path)
+        env_locations = [
+            self.env_path,
+            Path(__file__).parent.parent.parent.parent / ".env",  # project root
+            Path.cwd() / ".env",
+            Path.cwd().parent / ".env",
+        ]
+        for env_path in env_locations:
+            if env_path.exists():
+                load_dotenv(env_path)
+                return
 
     def _is_cache_valid(self) -> bool:
         if self._config_cache is None:
@@ -75,12 +84,10 @@ class ConfigManager:
         return obj
 
     def _create_default_config(self) -> None:
-        """Create default config.json file."""
         from .schema import (
             GeneralSettings,
             DatabaseSettings,
             AgentsSettings,
-            APIKeys,
             Profiles,
         )
 
@@ -88,7 +95,6 @@ class ConfigManager:
             general=GeneralSettings(),
             database=DatabaseSettings(),
             agents=AgentsSettings(),
-            api_keys=APIKeys(),
             profiles=Profiles(),
         )
 
@@ -96,17 +102,7 @@ class ConfigManager:
             json.dump(default_config.model_dump(), f, indent=2)
 
     def save(self, config: Config) -> None:
-        """
-        Save configuration to config.json.
-        Keeps ${VAR} placeholders for API keys.
-        Invalidates cache after saving.
-        """
         config_dict = config.model_dump()
-
-        api_keys = config_dict.get("api_keys", {})
-        for key, value in api_keys.items():
-            if value and not value.startswith("${"):
-                pass
 
         with open(self.config_path, "w") as f:
             json.dump(config_dict, f, indent=2)
@@ -119,20 +115,14 @@ class ConfigManager:
             pass
 
     def update(self, update: ConfigUpdate) -> Config:
-        """
-        Update configuration with partial changes.
-        """
         current = self.load()
 
-        # Apply updates
         if update.general:
             current.general = update.general
         if update.database:
             current.database = update.database
         if update.agents:
             current.agents = update.agents
-        if update.api_keys:
-            current.api_keys = update.api_keys
         if update.profiles:
             current.profiles = update.profiles
 
@@ -140,64 +130,57 @@ class ConfigManager:
         return current
 
     def validate(self) -> tuple[bool, Optional[str]]:
-        """
-        Validate configuration.
-        Returns (is_valid, error_message).
-        """
         try:
-            config = self.load()
+            self.load()
 
-            # Validate API keys are present
-            if not config.api_keys.anthropic and not config.api_keys.openai:
+            api_keys = self.get_api_keys()
+            if not api_keys.anthropic and not api_keys.openai:
                 return (
                     False,
-                    "At least one LLM API key is required (Anthropic or OpenAI)",
+                    "At least one LLM API key is required (Anthropic or OpenAI). Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env",
                 )
 
             return True, None
         except Exception as e:
             return False, str(e)
 
+    def get_api_keys(self) -> APIKeys:
+        if self._api_keys is None:
+            self._api_keys = APIKeys(
+                anthropic=os.getenv("ANTHROPIC_API_KEY"),
+                openai=os.getenv("OPENAI_API_KEY"),
+                openrouter=os.getenv("OPENROUTER_API_KEY"),
+                tavily=os.getenv("TAVILY_API_KEY"),
+            )
+        return self._api_keys
+
     def mask_api_keys(self, config: Config) -> Dict[str, Any]:
-        """
-        Create a copy of config with API keys masked for UI display.
-        """
         config_dict = config.model_dump()
 
-        api_keys = config_dict.get("api_keys", {})
-        for key, value in api_keys.items():
+        api_keys = self.get_api_keys()
+        masked_keys = {}
+        for key in ["anthropic", "openai", "openrouter", "tavily"]:
+            value = getattr(api_keys, key)
             if value and len(value) > 4:
-                api_keys[key] = f"***{value[-4:]}"
+                masked_keys[key] = f"***{value[-4:]}"
+            elif value:
+                masked_keys[key] = "***"
             else:
-                api_keys[key] = "***"
+                masked_keys[key] = None
 
-        config_dict["api_keys"] = api_keys
+        config_dict["api_keys"] = masked_keys
         return config_dict
 
     def get_api_key(self, provider: str) -> Optional[str]:
-        """
-        Get API key for a specific provider.
-        Checks config first, then environment variables.
-        """
-        config = self.load()
-
-        # Map provider names to config keys
-        key_map = {
-            "anthropic": "anthropic_api_key",
-            "openai": "openai_api_key",
-            "openrouter": "openrouter_api_key",
-            "tavily": "tavily_api_key",
+        env_map = {
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+            "tavily": "TAVILY_API_KEY",
         }
 
-        config_key = key_map.get(provider.lower())
-        if config_key:
-            # Check config first
-            api_keys = getattr(config.api_keys, provider.lower(), None)
-            if api_keys:
-                return api_keys
-
-            # Check environment
-            env_key = config_key.upper()
+        env_key = env_map.get(provider.lower())
+        if env_key:
             return os.getenv(env_key)
 
         return None
