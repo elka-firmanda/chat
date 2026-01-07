@@ -19,7 +19,7 @@ from app.tools.tavily import TavilyClient
 from app.tools.scraper import WebScraper
 
 from .memory import AsyncWorkingMemory
-from .graph import AgentType, StepStatus
+from .types import AgentType, StepStatus
 
 logger = logging.getLogger(__name__)
 

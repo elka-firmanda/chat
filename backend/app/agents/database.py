@@ -19,7 +19,7 @@ from app.config.config_manager import get_config
 from app.llm.providers import LLMProviderFactory, BaseLLMProvider
 from app.db.session import get_engine, get_engine_url
 
-from .graph import AgentType, StepStatus
+from .types import AgentType, StepStatus
 from .memory import AsyncWorkingMemory
 from .error_handler import AgentError, ErrorType
 

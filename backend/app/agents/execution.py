@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional, List
 
-from .graph import AgentState, AgentType, StepStatus
+from .types import AgentState, AgentType, StepStatus
 from .memory import AsyncWorkingMemory
 from .error_handler import (
     AgentError,
