@@ -2,7 +2,10 @@
 
 import json
 from collections.abc import AsyncGenerator
+from datetime import datetime
+from enum import Enum
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -21,6 +24,30 @@ from app.models.chat import (
     PlanStepStatus,
 )
 from app.utils.validators import sanitize_message_content
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively convert objects to JSON-serializable types."""
+    if obj is None:
+        return None
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, UUID):
+        return str(obj)
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(item) for item in obj]
+    # Fallback: try to convert to string
+    try:
+        return str(obj)
+    except Exception:
+        return None
+
 
 router = APIRouter()
 
@@ -176,7 +203,7 @@ async def stream_chat_response(
             role="assistant",
             content=assistant_message.content,
             agent_type="master",
-            extra_data=assistant_message.metadata,
+            extra_data=_sanitize_for_json(assistant_message.metadata),
         )
 
         title = await master.generate_title(
@@ -258,10 +285,12 @@ async def send_message(
         role="assistant",
         content=response_content,
         agent_type="master",
-        extra_data={
-            "deep_search": chat_request.deep_search,
-            "plan": [s.model_dump() for s in plan_steps] if plan_steps else None,
-        },
+        extra_data=_sanitize_for_json(
+            {
+                "deep_search": chat_request.deep_search,
+                "plan": [s.model_dump() for s in plan_steps] if plan_steps else None,
+            }
+        ),
     )
 
     title = await master.generate_title(sanitized_content, response_content)
@@ -402,7 +431,7 @@ async def fork_conversation(
                 content=msg.content,
                 agent_type=msg.agent_type,
                 parent_message_id=msg.parent_message_id,
-                extra_data=msg.extra_data,
+                extra_data=_sanitize_for_json(msg.extra_data),
             )
             fork_count += 1
 
