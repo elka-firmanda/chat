@@ -371,9 +371,35 @@ class AnthropicProvider(BaseLLMProvider):
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI GPT provider using the official SDK."""
 
+    MODELS_REQUIRING_MAX_COMPLETION_TOKENS = frozenset(
+        [
+            "o1",
+            "o1-mini",
+            "o1-preview",
+            "o3",
+            "o3-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4o-2024-05-13",
+            "gpt-4o-2024-08-06",
+            "gpt-4o-2024-11-20",
+            "gpt-4.1",
+            "gpt-4.5",
+            "gpt-5",
+        ]
+    )
+
     def __init__(self, config: ProviderConfig):
         super().__init__(config)
         self._client = None
+
+    def _uses_max_completion_tokens(self) -> bool:
+        """Check if the model requires max_completion_tokens instead of max_tokens."""
+        model = self.config.model.lower()
+        for pattern in self.MODELS_REQUIRING_MAX_COMPLETION_TOKENS:
+            if model.startswith(pattern):
+                return True
+        return False
 
     @property
     def client(self):
@@ -410,12 +436,13 @@ class OpenAIProvider(BaseLLMProvider):
         output_cost = (completion_tokens / 1_000_000) * model_pricing["output"]
         return input_cost + output_cost
 
-    async def _with_retry(self, coro):
-        """Execute coroutine with retry logic."""
+    async def _with_retry(self, request_fn):
+        """Execute request function with retry logic."""
         last_error = None
         for attempt in range(self.config.max_retries):
             try:
-                return await asyncio.wait_for(coro, timeout=self.config.timeout)
+                result = request_fn()
+                return await asyncio.wait_for(result, timeout=self.config.timeout)
             except asyncio.TimeoutError:
                 last_error = APIError(
                     f"Request timeout after {self.config.timeout}s", retry_after=1
@@ -474,22 +501,29 @@ class OpenAIProvider(BaseLLMProvider):
 
         chat_messages.extend(messages)
 
-        request_kwargs = dict(
+        token_limit = (
+            max_tokens or self.config.max_output_tokens or self.config.max_tokens
+        )
+
+        request_kwargs: Dict[str, Any] = dict(
             model=self.config.model,
             messages=chat_messages,
             temperature=temperature or self.config.temperature,
-            max_tokens=max_tokens
-            or self.config.max_output_tokens
-            or self.config.max_tokens,
             stream=False,
         )
+
+        if self._uses_max_completion_tokens():
+            request_kwargs["max_completion_tokens"] = token_limit
+        else:
+            request_kwargs["max_tokens"] = token_limit
 
         if json_mode:
             request_kwargs["response_format"] = {"type": "json_object"}
 
-        request = self.client.chat.completions.create(**request_kwargs)
+        async def make_request():
+            return await self.client.chat.completions.create(**request_kwargs)
 
-        response = await self._with_retry(request)
+        response = await self._with_retry(make_request)
 
         latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -537,17 +571,26 @@ class OpenAIProvider(BaseLLMProvider):
 
         chat_messages.extend(messages)
 
-        request = self.client.chat.completions.create(
+        token_limit = (
+            max_tokens or self.config.max_output_tokens or self.config.max_tokens
+        )
+
+        request_kwargs: Dict[str, Any] = dict(
             model=self.config.model,
             messages=chat_messages,
             temperature=temperature or self.config.temperature,
-            max_tokens=max_tokens
-            or self.config.max_output_tokens
-            or self.config.max_tokens,
             stream=True,
         )
 
-        stream = await self._with_retry(request)
+        if self._uses_max_completion_tokens():
+            request_kwargs["max_completion_tokens"] = token_limit
+        else:
+            request_kwargs["max_tokens"] = token_limit
+
+        async def make_request():
+            return await self.client.chat.completions.create(**request_kwargs)
+
+        stream = await self._with_retry(make_request)
 
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
@@ -612,12 +655,13 @@ class OpenRouterProvider(BaseLLMProvider):
         """Calculate cost for OpenRouter API."""
         return 0.0
 
-    async def _with_retry(self, coro):
-        """Execute coroutine with retry logic."""
+    async def _with_retry(self, request_fn):
+        """Execute request function with retry logic."""
         last_error = None
         for attempt in range(self.config.max_retries):
             try:
-                return await asyncio.wait_for(coro, timeout=self.config.timeout)
+                result = request_fn()
+                return await asyncio.wait_for(result, timeout=self.config.timeout)
             except asyncio.TimeoutError:
                 last_error = APIError(
                     f"Request timeout after {self.config.timeout}s", retry_after=1
@@ -676,7 +720,7 @@ class OpenRouterProvider(BaseLLMProvider):
 
         chat_messages.extend(messages)
 
-        request_kwargs = dict(
+        request_kwargs: Dict[str, Any] = dict(
             model=self.config.model,
             messages=chat_messages,
             temperature=temperature or self.config.temperature,
@@ -689,9 +733,10 @@ class OpenRouterProvider(BaseLLMProvider):
         if json_mode:
             request_kwargs["response_format"] = {"type": "json_object"}
 
-        request = self.client.chat.completions.create(**request_kwargs)
+        async def make_request():
+            return await self.client.chat.completions.create(**request_kwargs)
 
-        response = await self._with_retry(request)
+        response = await self._with_retry(make_request)
 
         latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -739,17 +784,20 @@ class OpenRouterProvider(BaseLLMProvider):
 
         chat_messages.extend(messages)
 
-        request = self.client.chat.completions.create(
-            model=self.config.model,
-            messages=chat_messages,
-            temperature=temperature or self.config.temperature,
-            max_tokens=max_tokens
+        request_kwargs = {
+            "model": self.config.model,
+            "messages": chat_messages,
+            "temperature": temperature or self.config.temperature,
+            "max_tokens": max_tokens
             or self.config.max_output_tokens
             or self.config.max_tokens,
-            stream=True,
-        )
+            "stream": True,
+        }
 
-        stream = await self._with_retry(request)
+        async def make_request():
+            return await self.client.chat.completions.create(**request_kwargs)
+
+        stream = await self._with_retry(make_request)
 
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
