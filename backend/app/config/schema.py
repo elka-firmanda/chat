@@ -117,7 +117,7 @@ class AgentsSettings(BaseModel):
     database: DatabaseAgentSettings = Field(default_factory=DatabaseAgentSettings)
 
 
-# API keys (will be substituted from environment)
+# API keys - loaded from .env only (security: never persisted to config.json)
 class APIKeys(BaseModel):
     anthropic: Optional[str] = None
     openai: Optional[str] = None
@@ -154,7 +154,6 @@ class Config(BaseModel):
     general: GeneralSettings = Field(default_factory=GeneralSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     agents: AgentsSettings = Field(default_factory=AgentsSettings)
-    api_keys: APIKeys = Field(default_factory=APIKeys)
     profiles: Profiles = Field(default_factory=Profiles)
     rate_limiting: RateLimitingSettings = Field(default_factory=RateLimitingSettings)
     current_profile: Optional[str] = None
@@ -165,7 +164,6 @@ class ConfigUpdate(BaseModel):
     general: Optional[GeneralSettings] = None
     database: Optional[DatabaseSettings] = None
     agents: Optional[AgentsSettings] = None
-    api_keys: Optional[APIKeys] = None
     profiles: Optional[Profiles] = None
     rate_limiting: Optional[RateLimitingSettings] = None
 

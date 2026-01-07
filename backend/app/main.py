@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.config.config_manager import config_manager
 from app.db.session import init_db, initialize_engine, get_database_info, _engine
-from app.api.routes import health, sessions, config, chat, tools, websocket, auth
+from app.api.routes import health, sessions, config, chat, tools, websocket
 from app.utils.shutdown import (
     get_shutdown_manager,
     create_shutdown_handler,
@@ -184,7 +184,6 @@ app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"]
 app.include_router(config.router, prefix="/api/v1/config", tags=["config"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 app.include_router(tools.router, prefix="/api/v1", tags=["tools"])
-app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 # WebSocket routes are included directly (not via include_router for proper WebSocket handling)
 app.include_router(websocket.router)
 

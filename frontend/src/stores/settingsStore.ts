@@ -39,7 +39,6 @@ interface ConfigState {
     tools: AgentSettings
     database: AgentSettings
   }
-  api_keys: Record<string, string>
   
   currentProfile: string | null
   profiles: {
@@ -123,7 +122,6 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
       system_prompt: ''
     }
   },
-  api_keys: {},
   
   currentProfile: null,
   profiles: null,
@@ -143,7 +141,6 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
         general: data.general || get().general,
         database: data.database || get().database,
         agents: data.agents || get().agents,
-        api_keys: data.api_keys || {},
         currentProfile: data.current_profile || null,
         isLoading: false
       })
@@ -165,7 +162,6 @@ export const useSettingsStore = create<ConfigState>()((set, get) => ({
         general: data.general || get().general,
         database: data.database || get().database,
         agents: data.agents || get().agents,
-        api_keys: data.api_keys || {},
         isLoading: false
       })
     } catch (error) {

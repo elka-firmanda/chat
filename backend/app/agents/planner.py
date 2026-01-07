@@ -105,17 +105,19 @@ _planner_llm_provider: Optional[BaseLLMProvider] = None
 
 
 def get_planner_llm_provider() -> BaseLLMProvider:
-    """Get or create the LLM provider for the planner agent."""
     global _planner_llm_provider
     if _planner_llm_provider is None:
+        from app.config.config_manager import config_manager
+
         config = get_config()
+        env_keys = config_manager.get_api_keys()
         api_keys: Dict[str, str] = {}
-        if config.api_keys.anthropic:
-            api_keys["anthropic"] = config.api_keys.anthropic
-        if config.api_keys.openai:
-            api_keys["openai"] = config.api_keys.openai
-        if config.api_keys.openrouter:
-            api_keys["openrouter"] = config.api_keys.openrouter
+        if env_keys.anthropic:
+            api_keys["anthropic"] = env_keys.anthropic
+        if env_keys.openai:
+            api_keys["openai"] = env_keys.openai
+        if env_keys.openrouter:
+            api_keys["openrouter"] = env_keys.openrouter
         agent_config = config.agents.planner.model_dump()
         _planner_llm_provider = LLMProviderFactory.from_agent_config(
             agent_config, api_keys

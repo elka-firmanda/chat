@@ -116,9 +116,9 @@ interface ChatState {
 export const useChatStore = create<ChatState>()(
   persist(
     (set) => ({
-      // Auth state
-      chatAuthRequired: null,
-      isChatAuthenticated: false,
+      // Auth state - default to not required (auth not yet implemented)
+      chatAuthRequired: false,
+      isChatAuthenticated: true,
       
       sessions: [],
       archivedSessions: [],

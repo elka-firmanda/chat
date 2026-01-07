@@ -58,17 +58,6 @@ test.describe('Settings Modal', () => {
     await expect(page.locator('select').first()).toBeVisible();
   });
 
-  test('should display API key inputs in API Keys tab', async ({ page }) => {
-    const settingsButton = page.locator('button[title="Settings"]');
-    await settingsButton.click();
-    
-    const apiKeysTab = page.locator('button:has-text("API Keys")');
-    await apiKeysTab.click();
-    
-    await expect(page.locator('text=Anthropic API Key')).toBeVisible();
-    await expect(page.locator('text=OpenAI API Key')).toBeVisible();
-  });
-
   test('should show profile options', async ({ page }) => {
     const settingsButton = page.locator('button[title="Settings"]');
     await settingsButton.click();

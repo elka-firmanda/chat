@@ -52,11 +52,10 @@ async def check_llm_providers(config: Any) -> Dict[str, Dict[str, Any]]:
 
     providers_status = {}
 
-    anthropic_key = (
-        getattr(config.api_keys, "anthropic", None)
-        if hasattr(config, "api_keys")
-        else None
-    )
+    from app.config.config_manager import config_manager
+
+    api_keys = config_manager.get_api_keys()
+    anthropic_key = api_keys.anthropic
     if anthropic_key:
         try:
             anthropic_config = ProviderConfig(
@@ -99,11 +98,7 @@ async def check_llm_providers(config: Any) -> Dict[str, Dict[str, Any]]:
             "error": "API key not configured",
         }
 
-    openai_key = (
-        getattr(config.api_keys, "openai", None)
-        if hasattr(config, "api_keys")
-        else None
-    )
+    openai_key = api_keys.openai
     if openai_key:
         try:
             openai_config = ProviderConfig(
@@ -151,11 +146,10 @@ async def check_llm_providers(config: Any) -> Dict[str, Dict[str, Any]]:
 async def check_tavily_status(config: Any) -> Dict[str, Any]:
     import httpx
 
-    tavily_key = (
-        getattr(config.api_keys, "tavily", None)
-        if hasattr(config, "api_keys")
-        else None
-    )
+    from app.config.config_manager import config_manager
+
+    api_keys = config_manager.get_api_keys()
+    tavily_key = api_keys.tavily
 
     if not tavily_key:
         return {

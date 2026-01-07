@@ -583,17 +583,13 @@ def _create_default_database_agent() -> DatabaseAgent:
     try:
         config = get_config()
 
+        from app.config.config_manager import config_manager
+
         agent_config = config.agents.database
 
         llm = None
         if agent_config.provider and agent_config.model:
-            api_key = (
-                config.api_keys.anthropic
-                if agent_config.provider == "anthropic"
-                else None
-            )
-            if agent_config.provider == "openai":
-                api_key = config.api_keys.openai
+            api_key = config_manager.get_api_key(agent_config.provider)
 
             llm = LLMProviderFactory.create(
                 provider=agent_config.provider,

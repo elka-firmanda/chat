@@ -51,10 +51,11 @@ class TitleGenerator:
             return self._provider
 
         try:
+            from app.config.config_manager import config_manager
+
             config = get_config()
-            # Use master agent config for title generation (typically most capable)
             master_config = config.agents.master
-            api_keys = config.api_keys
+            api_keys = config_manager.get_api_keys()
 
             if master_config.provider and getattr(api_keys, master_config.provider):
                 self._provider = LLMProviderFactory.create(

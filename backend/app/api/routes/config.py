@@ -323,18 +323,18 @@ async def list_models_endpoint(
         ..., description="Provider name (anthropic, openai, openrouter)"
     ),
     api_key: Optional[str] = Query(
-        None, description="API key for the provider (required for openai, openrouter)"
+        None,
+        description="API key for the provider (required for anthropic, openai, openrouter)",
     ),
 ):
     try:
         if not api_key:
-            config = get_config()
-            api_key = getattr(config.api_keys, provider.lower(), None)
+            api_key = config_manager.get_api_key(provider)
 
-        if not api_key and provider.lower() in ("openai", "openrouter"):
+        if not api_key and provider.lower() in ("anthropic", "openai", "openrouter"):
             raise HTTPException(
                 status_code=400,
-                detail=f"{provider} API key not configured. Please add your API key in Settings.",
+                detail=f"{provider} API key not configured. Set {provider.upper()}_API_KEY in .env file.",
             )
 
         models = await list_models_for_provider(provider, api_key)

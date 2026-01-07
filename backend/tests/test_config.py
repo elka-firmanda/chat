@@ -110,18 +110,6 @@ class TestAppConfig:
         assert config.agents["master"].provider == "anthropic"
         assert config.agents["planner"].provider == "openai"
 
-    def test_api_keys_in_config(self):
-        """Test API keys are accessible in configuration."""
-        config = AppConfig(
-            version="1.0",
-            api_keys={
-                "anthropic": "${ANTHROPIC_API_KEY}",
-                "openai": "${OPENAI_API_KEY}",
-            },
-        )
-
-        assert config.api_keys["anthropic"] == "${ANTHROPIC_API_KEY}"
-
     def test_profiles_in_config(self):
         """Test configuration profiles."""
         config = AppConfig(
