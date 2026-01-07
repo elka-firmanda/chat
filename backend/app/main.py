@@ -9,7 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config.config_manager import config_manager
-from app.db.session import init_db, initialize_engine, get_database_info, _engine
+from app.db.session import (
+    init_db,
+    initialize_engine,
+    get_database_info,
+    _engine,
+    get_engine_url,
+)
+from app.storage import get_storage, StorageInterface
 from app.api.routes import health, sessions, config, chat, tools, websocket
 from app.utils.shutdown import (
     get_shutdown_manager,
@@ -17,6 +24,35 @@ from app.utils.shutdown import (
     save_working_memory_state,
 )
 from app.utils.rate_limiter import get_rate_limiter, apply_rate_limit_config
+
+
+# Global storage instance for agents
+_storage: StorageInterface | None = None
+
+
+def get_storage_instance() -> StorageInterface | None:
+    """Get the current storage instance."""
+    return _storage
+
+
+async def initialize_storage() -> None:
+    """Initialize the storage layer based on database config."""
+    global _storage
+    db_info = get_database_info()
+    db_type = db_info["type"]
+    connection_string = db_info["url"]
+
+    _storage = get_storage(db_type, connection_string)
+    await _storage.initialize()
+    print(f"Storage layer initialized: {db_type}")
+
+
+async def close_storage() -> None:
+    """Close the storage connection."""
+    global _storage
+    if _storage is not None:
+        await _storage.close()
+        _storage = None
 
 
 @asynccontextmanager
@@ -33,6 +69,10 @@ async def lifespan(app: FastAPI):
 
     await init_db()
     print("Database tables initialized")
+
+    # Initialize storage layer for agents
+    await initialize_storage()
+    print("Storage layer initialized")
 
     try:
         config = config_manager.load()
@@ -76,6 +116,10 @@ async def lifespan(app: FastAPI):
             )
     except Exception as e:
         print(f"Warning: Could not cancel session tasks: {e}")
+
+    # Close storage connection
+    await close_storage()
+    print("Storage connection closed")
 
     # Use the shutdown manager's complete shutdown (disposes engine, etc.)
     # This is the final cleanup step
