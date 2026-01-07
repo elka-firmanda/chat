@@ -114,11 +114,28 @@ export const chatApi = {
       params: { session_id: sessionId }
     }),
   
-  stream: (sessionId: string, lastEventId?: string) => {
-    const url = lastEventId
-      ? `${API_URL}/v1/chat/stream/${sessionId}?lastEventId=${encodeURIComponent(lastEventId)}`
-      : `${API_URL}/v1/chat/stream/${sessionId}`
-    return new EventSource(url)
+  stream: async (sessionId: string, message: string, deepSearch = false, lastEventId?: string) => {
+    // Use fetch with POST for SSE (EventSource only supports GET which is deprecated)
+    const response = await fetch(`${API_URL}/v1/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(lastEventId && { 'Last-Event-Id': lastEventId })
+      },
+      body: JSON.stringify({
+        message,
+        session_id: sessionId,
+        deep_search: deepSearch
+      })
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      throw new Error(error.detail || `HTTP ${response.status}`)
+    }
+
+    // Return the reader for SSE event parsing
+    return response.body?.getReader()
   },
   
   cancel: (sessionId: string) =>

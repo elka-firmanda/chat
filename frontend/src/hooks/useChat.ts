@@ -1,6 +1,43 @@
 import { useCallback } from 'react'
-import { useChatStore } from '../stores/chatStore'
+import { useChatStore, type PlanStep } from '../stores/chatStore'
 import { chatApi, sessionsApi } from '../services/api'
+
+// SSE event parser for fetch-based streaming
+async function parseSSEResponse(
+  reader: ReadableStreamDefaultReader,
+  handlers: Record<string, (data: unknown) => void>
+): Promise<void> {
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        const eventType = line.slice(7).trim()
+        // Find the data line that follows
+        const dataLineIndex = lines.findIndex((l, i) => 
+          i > lines.indexOf(line) && l.startsWith('data:')
+        )
+        if (dataLineIndex !== -1) {
+          const dataStr = lines[dataLineIndex].slice(6).trim()
+          try {
+            const data = JSON.parse(dataStr)
+            handlers[eventType]?.(data)
+          } catch {
+            handlers[eventType]?.(dataStr)
+          }
+        }
+      }
+    }
+  }
+}
 
 export function useChat() {
   const {
@@ -56,87 +93,63 @@ export function useChat() {
         created_at: new Date().toISOString()
       })
 
-      const eventSource = chatApi.stream(session_id)
+      // Use POST-based SSE streaming
+      const reader = await chatApi.stream(session_id, content, deepSearch)
 
-      eventSource.addEventListener('token', (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          if (data.token) {
-            appendStreamingContent(data.token)
-            appendToLastMessage(session_id, data.token)
+      const handlers: Record<string, (data: unknown) => void> = {
+        token: (data: unknown) => {
+          const d = data as { token?: string }
+          if (d.token) {
+            appendStreamingContent(d.token)
+            appendToLastMessage(session_id, d.token)
           }
-        } catch (err) {
-          console.error('Failed to parse token event:', err)
-        }
-      })
-
-      eventSource.addEventListener('status', (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          setStatusMessage(data.message)
-        } catch (err) {
-          console.error('Failed to parse status event:', err)
-        }
-      })
-
-      eventSource.addEventListener('plan', (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          setPlan(data.steps)
-        } catch (err) {
-          console.error('Failed to parse plan event:', err)
-        }
-      })
-
-      eventSource.addEventListener('step_update', (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          updatePlanStep(data.step_index, {
-            status: data.status,
-            result: data.result,
-            error: data.error
-          })
-        } catch (err) {
-          console.error('Failed to parse step_update event:', err)
-        }
-      })
-
-      eventSource.addEventListener('message', (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          if (data.message) {
-            updateMessage(session_id, assistantMessageId, {
-              content: data.message.content || useChatStore.getState().streamingContent,
-              metadata: data.message.metadata
+        },
+        status: (data: unknown) => {
+          const d = data as { message?: string }
+          setStatusMessage(d.message || null)
+        },
+        plan: (data: unknown) => {
+          const d = data as { steps?: PlanStep[] }
+          setPlan(d.steps || [])
+        },
+        step_update: (data: unknown) => {
+          const d = data as { step_index?: number; status?: 'pending' | 'in_progress' | 'completed' | 'failed'; result?: string; error?: string }
+          if (typeof d.step_index === 'number') {
+            updatePlanStep(d.step_index, {
+              status: d.status,
+              result: d.result,
+              error: d.error
             })
           }
-        } catch (err) {
-          console.error('Failed to parse message event:', err)
-        }
-      })
-
-      eventSource.addEventListener('done', () => {
-        eventSource.close()
-        setLoading(false)
-        setStatusMessage(null)
-      })
-
-      eventSource.addEventListener('error', (e: Event) => {
-        const event = e as MessageEvent
-        try {
-          if (event.data) {
-            const data = JSON.parse(event.data)
-            console.error('SSE error:', data.message)
+        },
+        message: (data: unknown) => {
+          const d = data as { message?: { content?: string; metadata?: Record<string, unknown> } }
+          if (d.message) {
+            updateMessage(session_id, assistantMessageId, {
+              content: d.message.content || useChatStore.getState().streamingContent,
+              metadata: d.message.metadata
+            })
           }
-        } catch {
-          console.error('SSE connection error')
+        },
+        done: () => {
+          setLoading(false)
+          setStatusMessage(null)
+        },
+        error: (data: unknown) => {
+          const d = data as { message?: string }
+          console.error('SSE error:', d.message)
+          setLoading(false)
         }
-        eventSource.close()
-        setLoading(false)
-      })
+      }
 
-      eventSource.onerror = () => {
-        eventSource.close()
+      // Start parsing SSE events
+      if (reader) {
+        parseSSEResponse(reader, handlers).catch((err) => {
+          console.error('SSE parsing error:', err)
+          setLoading(false)
+        })
+      } else {
+        console.error('Failed to get SSE reader')
         setLoading(false)
       }
 
@@ -237,26 +250,36 @@ export function useChat() {
       const response = await chatApi.regenerate(messageId)
       const { session_id } = response.data
 
-      const eventSource = chatApi.stream(session_id)
+      // Get the original message to extract the content for streaming
+      const messages = useChatStore.getState().messages[session_id] || []
+      const originalMsg = messages.find((m: { id: string }) => m.id === messageId)
+      const messageContent = originalMsg?.content || ''
 
-      eventSource.addEventListener('token', (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          if (data.token) {
-            appendStreamingContent(data.token)
+      // Use POST-based SSE streaming
+      const reader = await chatApi.stream(session_id, messageContent, false)
+
+      const handlers: Record<string, (data: unknown) => void> = {
+        token: (data: unknown) => {
+          const d = data as { token?: string }
+          if (d.token) {
+            appendStreamingContent(d.token)
           }
-        } catch (err) {
-          console.error('Failed to parse token event:', err)
+        },
+        done: () => {
+          setLoading(false)
+        },
+        error: () => {
+          setLoading(false)
         }
-      })
+      }
 
-      eventSource.addEventListener('done', () => {
-        eventSource.close()
-        setLoading(false)
-      })
-
-      eventSource.onerror = () => {
-        eventSource.close()
+      if (reader) {
+        parseSSEResponse(reader, handlers).catch((err) => {
+          console.error('SSE parsing error:', err)
+          setLoading(false)
+        })
+      } else {
+        console.error('Failed to get SSE reader for regenerate')
         setLoading(false)
       }
 
