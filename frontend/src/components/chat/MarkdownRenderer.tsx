@@ -89,6 +89,17 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
             return <>{children}</>
           },
           a({ href, children }) {
+            const isValidUrl = href && (
+              href.startsWith('http://') ||
+              href.startsWith('https://') ||
+              href.startsWith('mailto:') ||
+              (href.startsWith('www.') && href.includes('.'))
+            )
+
+            if (!isValidUrl) {
+              return <>{children}</>
+            }
+
             return (
               <a
                 href={href}

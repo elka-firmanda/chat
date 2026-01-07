@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { User, Bot, Loader2, ChevronDown, ChevronRight, Check, Circle, XCircle } from 'lucide-react'
 import { Message } from '../../stores/chatStore'
 import { useChatStore } from '../../stores/chatStore'
 import ChartDisplay from './ChartDisplay'
 import ExportButton from './ExportButton'
+import MarkdownRenderer from './MarkdownRenderer'
 
 interface MessageListProps {
   messages: Message[]
@@ -91,9 +90,7 @@ export default function MessageList({
 
               {streamingContent ? (
                 <div className="bg-secondary rounded-2xl px-4 py-3 inline-block max-w-full text-left">
-                  <div className="markdown-content prose prose-sm dark:prose-invert max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
-                  </div>
+                  <MarkdownRenderer content={streamingContent} className="prose prose-sm dark:prose-invert max-w-none" />
                 </div>
               ) : (
                 <div className="bg-secondary rounded-2xl px-4 py-3 inline-block">
@@ -234,9 +231,7 @@ function MessageBubble({ message }: { message: Message }) {
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
-            <div className="markdown-content prose prose-sm dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
-            </div>
+            <MarkdownRenderer content={displayContent} className="prose prose-sm dark:prose-invert max-w-none" />
           )}
         </div>
 
