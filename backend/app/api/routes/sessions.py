@@ -178,9 +178,14 @@ async def get_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    messages = await repo.get_messages(session_id, limit=limit, offset=offset)
-    total = await repo.get_message_count(session_id)
-    has_more = (offset + len(messages)) < total
+    try:
+        messages = await repo.get_messages(session_id, limit=limit, offset=offset)
+        total = await repo.get_message_count(session_id)
+        has_more = (offset + len(messages)) < total
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching messages: {str(e)}"
+        )
 
     return {
         "session": {
@@ -201,7 +206,7 @@ async def get_session(
                 "content": m.content,
                 "agent_type": m.agent_type,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
-                "metadata": m.metadata,
+                "metadata": m.extra_data or {},
             }
             for m in messages
         ],
@@ -297,7 +302,7 @@ async def export_session(
                 "content": m.content,
                 "agent_type": m.agent_type,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
-                "metadata": m.extra_data,
+                "metadata": m.extra_data or {},
             }
             for m in messages
         ],
