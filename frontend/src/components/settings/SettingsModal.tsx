@@ -492,7 +492,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [profile, setProfile] = useState('custom')
-  const { toast } = useToastStore()
+  const { success: showToast } = useToastStore()
   const detectedTimezone = typeof Intl !== 'undefined' 
     ? Intl.DateTimeFormat().resolvedOptions().timeZone 
     : 'UTC'
@@ -534,7 +534,7 @@ export default function SettingsModal({ open, onOpenChange }: SettingsModalProps
         profiles: config.profiles,
       })
       await loadConfig()
-      toast.success('Settings saved successfully')
+      showToast('Settings saved successfully')
       // Keep modal open - don't call onOpenChange(false)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message :
