@@ -1,127 +1,26 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { chatApi } from '../services/api'
 
-interface MemoryUpdateEvent {
-  update_type: 'full' | 'incremental' | 'node_add' | 'node_update'
-  memory_tree: Record<string, unknown>
-  timeline: Array<{
-    node_id: string
-    agent: string
-    node_type: string
-    description: string
-    status: string
-    timestamp: string
-    parent_id?: string
-  }>
-  index: Record<string, unknown>
-  stats: {
-    total_nodes: number
-    timeline_length: number
-  }
-}
-
-interface NodeAddedEvent {
-  node_id: string
-  agent: string
-  node_type: string
-  description: string
-  parent_id?: string
-  content?: Record<string, unknown>
-  timestamp: string
-}
-
-interface NodeUpdatedEvent {
-  node_id: string
-  status?: string
-  content?: Record<string, unknown>
-  completed: boolean
-  timestamp: string
-}
-
-interface TimelineUpdateEvent {
-  node_id: string
-  agent: string
-  node_type: string
-  description: string
-  status: string
-  parent_id?: string
-  timestamp: string
-}
-
-interface StepProgressEvent {
-  step_id: string
+interface PlanStep {
   step_number: number
-  total_steps: number
-  agent: string
-  status: string
   description: string
-  logs?: string
-  progress_percentage: number
-}
-
-interface ReconnectState {
-  isReconnecting: boolean
-  retryCount: number
-  maxRetries: number
-  nextRetryDelay: number
-  lastEventId: string | null
+  agent?: string
+  status?: 'pending' | 'in_progress' | 'completed' | 'failed'
 }
 
 interface UseSSEOptions {
-  onThought?: (data: { agent: string; content: string }) => void
-  onStepUpdate?: (data: { step_id: string; status: string; description: string; logs?: string }) => void
-  onStepProgress?: (data: StepProgressEvent) => void
-  onMemoryUpdate?: (data: MemoryUpdateEvent) => void
-  onNodeAdded?: (data: NodeAddedEvent) => void
-  onNodeUpdated?: (data: NodeUpdatedEvent) => void
-  onTimelineUpdate?: (data: TimelineUpdateEvent) => void
-  onMessageChunk?: (data: { content: string }) => void
-  onError?: (data: {
-    error: {
-      error_type: string
-      message: string
-      timestamp: string
-      retry_count: number
-      max_retries: number
-      can_retry: boolean
-    }
-    step_info?: {
-      type: string
-      description: string
-      step_number: number
-    }
-    intervention_options: {
-      retry: boolean
-      skip: boolean
-      abort: boolean
-    }
-    user_friendly?: {
-      title: string
-      description: string
-      suggestion: string
-      severity: string
-    }
-    suggested_actions?: string[]
-  }) => void
-  onRetry?: (data: {
-    retry_count: number
-    max_retries: number
-    delay: number
-  }) => void
-  onIntervention?: (data: {
-    action: string
-    error: Record<string, unknown> | null
-  }) => void
-  onComplete?: (data: { message_id: string }) => void
-  onReconnectAttempt?: (data: { retryCount: number; delay: number }) => void
-  onReconnectSuccess?: (data: { retryCount: number }) => void
-  onHeartbeat?: () => void
+  onToken?: (data: { token: string }) => void
+  onStatus?: (data: { message: string }) => void
+  onPlan?: (data: { steps: PlanStep[] }) => void
+  onStepUpdate?: (data: { step_index: number; status: string; result?: string; error?: string }) => void
+  onMessage?: (data: { session_id: string; message: Record<string, unknown> }) => void
+  onDone?: () => void
+  onError?: (data: { message: string }) => void
 }
 
-const MAX_RETRY_DELAY = 30000
+const MAX_RECONNECT_ATTEMPTS = 5
 const INITIAL_RETRY_DELAY = 1000
-const HEARTBEAT_INTERVAL = 30000
-const MAX_RECONNECT_ATTEMPTS = 10
+const MAX_RETRY_DELAY = 30000
 
 function calculateNextDelay(currentDelay: number): number {
   return Math.min(currentDelay * 2, MAX_RETRY_DELAY)
@@ -130,21 +29,11 @@ function calculateNextDelay(currentDelay: number): number {
 export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [reconnectState, setReconnectState] = useState<ReconnectState>({
-    isReconnecting: false,
-    retryCount: 0,
-    maxRetries: MAX_RECONNECT_ATTEMPTS,
-    nextRetryDelay: INITIAL_RETRY_DELAY,
-    lastEventId: null,
-  })
 
   const eventSourceRef = useRef<EventSource | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const heartbeatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptsRef = useRef(0)
   const currentDelayRef = useRef(INITIAL_RETRY_DELAY)
-  const lastEventIdRef = useRef<string | null>(null)
-  const previousSessionIdRef = useRef<string | null>(null)
   const optionsRef = useRef(options)
   optionsRef.current = options
 
@@ -153,442 +42,111 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
       eventSourceRef.current.close()
       eventSourceRef.current = null
     }
-    if (heartbeatTimeoutRef.current) {
-      clearTimeout(heartbeatTimeoutRef.current)
-      heartbeatTimeoutRef.current = null
-    }
   }, [])
 
-  const setupHeartbeat = useCallback((es: EventSource) => {
-    if (heartbeatTimeoutRef.current) {
-      clearTimeout(heartbeatTimeoutRef.current)
-    }
+  const setupEventListeners = useCallback((es: EventSource) => {
+    es.addEventListener('token', (e) => {
+      const data = JSON.parse(e.data) as { token: string }
+      optionsRef.current.onToken?.(data)
+    })
 
-    heartbeatTimeoutRef.current = setTimeout(() => {
-      if (es.readyState === EventSource.OPEN) {
-        optionsRef.current.onHeartbeat?.()
-        setupHeartbeat(es)
-      }
-    }, HEARTBEAT_INTERVAL)
-  }, [])
+    es.addEventListener('status', (e) => {
+      const data = JSON.parse(e.data) as { message: string }
+      optionsRef.current.onStatus?.(data)
+    })
 
-  const handleSuccessfulConnection = useCallback((es: EventSource, retryCount: number) => {
-    setIsConnected(true)
-    setError(null)
-    setReconnectState(prev => ({
-      ...prev,
-      isReconnecting: false,
-      retryCount: 0,
-      nextRetryDelay: INITIAL_RETRY_DELAY,
-    }))
-    reconnectAttemptsRef.current = 0
-    currentDelayRef.current = INITIAL_RETRY_DELAY
-    setupHeartbeat(es)
-    optionsRef.current.onReconnectSuccess?.({ retryCount })
-  }, [setupHeartbeat])
-
-  const attemptReconnect = useCallback(() => {
-    if (!sessionId) return
-
-    const retryCount = reconnectAttemptsRef.current + 1
-    const delay = currentDelayRef.current
-
-    if (retryCount > MAX_RECONNECT_ATTEMPTS) {
-      setError('Max reconnection attempts reached. Please refresh the page.')
-      setReconnectState(prev => ({ ...prev, isReconnecting: false }))
-      return
-    }
-
-    setReconnectState(prev => ({
-      ...prev,
-      isReconnecting: true,
-      retryCount,
-      nextRetryDelay: delay,
-    }))
-
-    reconnectAttemptsRef.current = retryCount
-    currentDelayRef.current = calculateNextDelay(currentDelayRef.current)
-
-    optionsRef.current.onReconnectAttempt?.({ retryCount, delay })
-
-    reconnectTimeoutRef.current = setTimeout(() => {
-      const es = chatApi.stream(sessionId, lastEventIdRef.current || undefined)
-      eventSourceRef.current = es
-
-      es.onopen = () => {
-        handleSuccessfulConnection(es, retryCount)
-      }
-
-      es.onerror = (err) => {
-        console.error('SSE reconnection error:', err)
-        cleanupEventSource()
-        attemptReconnect()
-      }
-
-      es.addEventListener('thought', (e) => {
-        const data = JSON.parse(e.data) as { agent: string; content: string }
-        if (e.lastEventId) {
-          lastEventIdRef.current = e.lastEventId
-        }
-        optionsRef.current.onThought?.(data)
-      })
-
-      es.addEventListener('step_update', (e) => {
-        const data = JSON.parse(e.data) as { step_id: string; status: string; description: string; logs?: string }
-        if (e.lastEventId) {
-          lastEventIdRef.current = e.lastEventId
-        }
-        optionsRef.current.onStepUpdate?.(data)
-      })
-
-      es.addEventListener('step_progress', (e) => {
-        const data = JSON.parse(e.data) as StepProgressEvent
-        if (e.lastEventId) {
-          lastEventIdRef.current = e.lastEventId
-        }
-        optionsRef.current.onStepProgress?.(data)
-      })
-
-      es.addEventListener('memory_update', (e) => {
-        const data = JSON.parse(e.data) as MemoryUpdateEvent
-        if (e.lastEventId) {
-          lastEventIdRef.current = e.lastEventId
-        }
-        optionsRef.current.onMemoryUpdate?.(data)
-      })
-
-      es.addEventListener('node_added', (e) => {
-        const data = JSON.parse(e.data) as NodeAddedEvent
-        if (e.lastEventId) {
-          lastEventIdRef.current = e.lastEventId
-        }
-        optionsRef.current.onNodeAdded?.(data)
-      })
-
-      es.addEventListener('node_updated', (e) => {
-        const data = JSON.parse(e.data) as NodeUpdatedEvent
-        if (e.lastEventId) {
-          lastEventIdRef.current = e.lastEventId
-        }
-        optionsRef.current.onNodeUpdated?.(data)
-      })
-
-      es.addEventListener('timeline_update', (e) => {
-        const data = JSON.parse(e.data) as TimelineUpdateEvent
-        if (e.lastEventId) {
-          lastEventIdRef.current = e.lastEventId
-        }
-        optionsRef.current.onTimelineUpdate?.(data)
-      })
-
-      es.addEventListener('message_chunk', (e) => {
-        const data = JSON.parse(e.data) as { content: string }
-        if (e.lastEventId) {
-          lastEventIdRef.current = e.lastEventId
-        }
-        optionsRef.current.onMessageChunk?.(data)
-      })
-
-      es.addEventListener('error', (e: Event) => {
-        const event = e as MessageEvent
-        try {
-          const data = JSON.parse(event.data) as {
-            error: {
-              error_type: string
-              message: string
-              timestamp: string
-              retry_count: number
-              max_retries: number
-              can_retry: boolean
-            }
-            step_info?: {
-              type: string
-              description: string
-              step_number: number
-            }
-            intervention_options: {
-              retry: boolean
-              skip: boolean
-              abort: boolean
-            }
-            user_friendly?: {
-              title: string
-              description: string
-              suggestion: string
-              severity: string
-            }
-            suggested_actions?: string[]
-          }
-          setError(data.error.message)
-
-          console.group('SSE error event')
-          console.error('Error Type:', data.error.error_type)
-          console.error('Message:', data.error.message)
-          console.error('Timestamp:', data.error.timestamp)
-          console.error('Retry:', `${data.error.retry_count}/${data.error.max_retries}`)
-          if (data.user_friendly) {
-            console.log('User Friendly:', data.user_friendly)
-          }
-          if (data.suggested_actions) {
-            console.log('Suggested Actions:', data.suggested_actions)
-          }
-          console.groupEnd()
-
-          optionsRef.current.onError?.(data)
-        } catch (parseError) {
-          const legacyData = JSON.parse(event.data) as { message: string; retry_count: number }
-          setError(legacyData.message)
-          console.error('Error parsing SSE event:', parseError)
-          console.error('Raw error data:', legacyData)
-          optionsRef.current.onError?.({
-            error: {
-              error_type: 'unknown_error',
-              message: legacyData.message,
-              timestamp: new Date().toISOString(),
-              retry_count: legacyData.retry_count,
-              max_retries: 3,
-              can_retry: legacyData.retry_count < 3,
-            },
-            intervention_options: { retry: true, skip: true, abort: true },
-          })
-        }
-      })
-
-      es.addEventListener('retry', (e) => {
-        const data = JSON.parse(e.data) as {
-          retry_count: number
-          max_retries: number
-          delay: number
-        }
-        optionsRef.current.onRetry?.(data)
-      })
-
-      es.addEventListener('intervention', (e) => {
-        const data = JSON.parse(e.data) as {
-          action: string
-          error: Record<string, unknown> | null
-        }
-        optionsRef.current.onIntervention?.(data)
-      })
-
-      es.addEventListener('complete', (e) => {
-        const data = JSON.parse(e.data) as { message_id: string }
-        if (e.lastEventId) {
-          lastEventIdRef.current = e.lastEventId
-        }
-        setIsConnected(false)
-        cleanupEventSource()
-        optionsRef.current.onComplete?.(data)
-      })
-
-      es.onerror = (err) => {
-        console.error('SSE error:', err)
-        cleanupEventSource()
-        setIsConnected(false)
-        setError('Connection lost')
-        attemptReconnect()
-      }
-    }, delay)
-  }, [sessionId, cleanupEventSource, handleSuccessfulConnection])
-
-  const manualReconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current)
-      reconnectTimeoutRef.current = null
-    }
-    reconnectAttemptsRef.current = 0
-    currentDelayRef.current = INITIAL_RETRY_DELAY
-    cleanupEventSource()
-    attemptReconnect()
-  }, [cleanupEventSource, attemptReconnect])
-
-  useEffect(() => {
-    if (!sessionId) {
-      setIsConnected(false)
-      setReconnectState(prev => ({ ...prev, isReconnecting: false, retryCount: 0 }))
-      return
-    }
-
-    if (previousSessionIdRef.current && previousSessionIdRef.current !== sessionId) {
-      chatApi.cancel(previousSessionIdRef.current).catch(console.error)
-    }
-    previousSessionIdRef.current = sessionId
-
-    setError(null)
-    cleanupEventSource()
-    const es = chatApi.stream(sessionId)
-    eventSourceRef.current = es
-
-    es.onopen = () => {
-      handleSuccessfulConnection(es, 0)
-    }
-
-    es.addEventListener('thought', (e) => {
-      const data = JSON.parse(e.data) as { agent: string; content: string }
-      if (e.lastEventId) {
-        lastEventIdRef.current = e.lastEventId
-        setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
-      }
-      optionsRef.current.onThought?.(data)
+    es.addEventListener('plan', (e) => {
+      const data = JSON.parse(e.data) as { steps: PlanStep[] }
+      optionsRef.current.onPlan?.(data)
     })
 
     es.addEventListener('step_update', (e) => {
-      const data = JSON.parse(e.data) as { step_id: string; status: string; description: string; logs?: string }
-      if (e.lastEventId) {
-        lastEventIdRef.current = e.lastEventId
-        setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
-      }
+      const data = JSON.parse(e.data) as { step_index: number; status: string; result?: string; error?: string }
       optionsRef.current.onStepUpdate?.(data)
     })
 
-    es.addEventListener('step_progress', (e) => {
-      const data = JSON.parse(e.data) as StepProgressEvent
-      if (e.lastEventId) {
-        lastEventIdRef.current = e.lastEventId
-        setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
-      }
-      optionsRef.current.onStepProgress?.(data)
+    es.addEventListener('message', (e) => {
+      const data = JSON.parse(e.data) as { session_id: string; message: Record<string, unknown> }
+      optionsRef.current.onMessage?.(data)
     })
 
-    es.addEventListener('memory_update', (e) => {
-      const data = JSON.parse(e.data) as MemoryUpdateEvent
-      if (e.lastEventId) {
-        lastEventIdRef.current = e.lastEventId
-        setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
-      }
-      optionsRef.current.onMemoryUpdate?.(data)
-    })
-
-    es.addEventListener('node_added', (e) => {
-      const data = JSON.parse(e.data) as NodeAddedEvent
-      if (e.lastEventId) {
-        lastEventIdRef.current = e.lastEventId
-        setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
-      }
-      optionsRef.current.onNodeAdded?.(data)
-    })
-
-    es.addEventListener('node_updated', (e) => {
-      const data = JSON.parse(e.data) as NodeUpdatedEvent
-      if (e.lastEventId) {
-        lastEventIdRef.current = e.lastEventId
-        setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
-      }
-      optionsRef.current.onNodeUpdated?.(data)
-    })
-
-    es.addEventListener('timeline_update', (e) => {
-      const data = JSON.parse(e.data) as TimelineUpdateEvent
-      if (e.lastEventId) {
-        lastEventIdRef.current = e.lastEventId
-        setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
-      }
-      optionsRef.current.onTimelineUpdate?.(data)
-    })
-
-    es.addEventListener('message_chunk', (e) => {
-      const data = JSON.parse(e.data) as { content: string }
-      if (e.lastEventId) {
-        lastEventIdRef.current = e.lastEventId
-        setReconnectState(prev => ({ ...prev, lastEventId: e.lastEventId }))
-      }
-      optionsRef.current.onMessageChunk?.(data)
+    es.addEventListener('done', () => {
+      setIsConnected(false)
+      cleanupEventSource()
+      optionsRef.current.onDone?.()
     })
 
     es.addEventListener('error', (e: Event) => {
       const event = e as MessageEvent
       try {
-        const data = JSON.parse(event.data) as {
-          error: {
-            error_type: string
-            message: string
-            timestamp: string
-            retry_count: number
-            max_retries: number
-            can_retry: boolean
-          }
-          step_info?: {
-            type: string
-            description: string
-            step_number: number
-          }
-          intervention_options: {
-            retry: boolean
-            skip: boolean
-            abort: boolean
-          }
-          user_friendly?: {
-            title: string
-            description: string
-            suggestion: string
-            severity: string
-          }
-          suggested_actions?: string[]
+        if (event.data) {
+          const data = JSON.parse(event.data) as { message: string }
+          setError(data.message)
+          optionsRef.current.onError?.(data)
         }
-        setError(data.error.message)
-
-        console.group('SSE error event')
-        console.error('Error Type:', data.error.error_type)
-        console.error('Message:', data.error.message)
-        console.error('Timestamp:', data.error.timestamp)
-        console.error('Retry:', `${data.error.retry_count}/${data.error.max_retries}`)
-        if (data.user_friendly) {
-          console.log('User Friendly:', data.user_friendly)
-        }
-        if (data.suggested_actions) {
-          console.log('Suggested Actions:', data.suggested_actions)
-        }
-        console.groupEnd()
-
-        optionsRef.current.onError?.(data)
-      } catch (parseError) {
-        const legacyData = JSON.parse(event.data) as { message: string; retry_count: number }
-        setError(legacyData.message)
-        console.error('Error parsing SSE event:', parseError)
-        console.error('Raw error data:', legacyData)
-        optionsRef.current.onError?.({
-          error: {
-            error_type: 'unknown_error',
-            message: legacyData.message,
-            timestamp: new Date().toISOString(),
-            retry_count: legacyData.retry_count,
-            max_retries: 3,
-            can_retry: legacyData.retry_count < 3,
-          },
-          intervention_options: { retry: true, skip: true, abort: true },
-        })
+      } catch {
+        console.error('SSE error event:', event)
       }
     })
+  }, [cleanupEventSource])
 
-    es.addEventListener('retry', (e) => {
-      const data = JSON.parse(e.data) as {
-        retry_count: number
-        max_retries: number
-        delay: number
-      }
-      optionsRef.current.onRetry?.(data)
-    })
+  const attemptReconnect = useCallback(() => {
+    if (!sessionId) return
 
-    es.addEventListener('intervention', (e) => {
-      const data = JSON.parse(e.data) as {
-        action: string
-        error: Record<string, unknown> | null
-      }
-      optionsRef.current.onIntervention?.(data)
-    })
+    const retryCount = reconnectAttemptsRef.current + 1
 
-    es.addEventListener('complete', (e) => {
-      const data = JSON.parse(e.data) as { message_id: string }
-      if (e.lastEventId) {
-        lastEventIdRef.current = e.lastEventId
+    if (retryCount > MAX_RECONNECT_ATTEMPTS) {
+      setError('Max reconnection attempts reached. Please refresh the page.')
+      return
+    }
+
+    reconnectAttemptsRef.current = retryCount
+    const delay = currentDelayRef.current
+    currentDelayRef.current = calculateNextDelay(currentDelayRef.current)
+
+    reconnectTimeoutRef.current = setTimeout(() => {
+      const es = chatApi.stream(sessionId)
+      eventSourceRef.current = es
+
+      es.onopen = () => {
+        setIsConnected(true)
+        setError(null)
+        reconnectAttemptsRef.current = 0
+        currentDelayRef.current = INITIAL_RETRY_DELAY
       }
+
+      setupEventListeners(es)
+
+      es.onerror = () => {
+        cleanupEventSource()
+        setIsConnected(false)
+        attemptReconnect()
+      }
+    }, delay)
+  }, [sessionId, cleanupEventSource, setupEventListeners])
+
+  useEffect(() => {
+    if (!sessionId) {
       setIsConnected(false)
-      cleanupEventSource()
-      optionsRef.current.onComplete?.(data)
-    })
+      return
+    }
 
-    es.onerror = (err) => {
-      console.error('SSE error:', err)
+    setError(null)
+    cleanupEventSource()
+
+    const es = chatApi.stream(sessionId)
+    eventSourceRef.current = es
+
+    es.onopen = () => {
+      setIsConnected(true)
+      setError(null)
+      reconnectAttemptsRef.current = 0
+      currentDelayRef.current = INITIAL_RETRY_DELAY
+    }
+
+    setupEventListeners(es)
+
+    es.onerror = () => {
       cleanupEventSource()
       setIsConnected(false)
       setError('Connection lost')
@@ -602,7 +160,7 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
       }
       setIsConnected(false)
     }
-  }, [sessionId, cleanupEventSource, attemptReconnect, handleSuccessfulConnection])
+  }, [sessionId, cleanupEventSource, attemptReconnect, setupEventListeners])
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -611,12 +169,6 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
     }
     cleanupEventSource()
     setIsConnected(false)
-    setReconnectState(prev => ({
-      ...prev,
-      isReconnecting: false,
-      retryCount: 0,
-      nextRetryDelay: INITIAL_RETRY_DELAY,
-    }))
     reconnectAttemptsRef.current = 0
     currentDelayRef.current = INITIAL_RETRY_DELAY
   }, [cleanupEventSource])
@@ -625,7 +177,5 @@ export function useSSE(sessionId: string | null, options: UseSSEOptions = {}) {
     isConnected,
     error,
     disconnect,
-    reconnectState,
-    manualReconnect,
   }
 }

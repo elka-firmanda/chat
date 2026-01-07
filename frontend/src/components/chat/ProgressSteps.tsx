@@ -1,56 +1,46 @@
 import { useState, useEffect, useRef } from 'react'
 import { CheckCircle, Circle, AlertCircle, Loader2 } from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
-import { AgentStep } from '../../stores/chatStore'
+import { PlanStep } from '../../stores/chatStore'
 import { ChevronDown } from 'lucide-react'
 
 interface ProgressStepsProps {
-  steps: AgentStep[]
-  onToggleLogs?: (stepId: string) => void
+  steps: PlanStep[]
+  onToggleLogs?: (stepIndex: number) => void
 }
 
 export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProps) {
-  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
+  const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set())
   const activeStepRef = useRef<HTMLDivElement>(null)
   
   if (steps.length === 0) return null
   
-  // Check if all steps are complete
   const allCompleted = steps.every(step => step.status === 'completed' || step.status === 'failed')
-  
-  // Find the currently running step for auto-scroll
-  const runningStepId = steps.find(step => step.status === 'running')?.id
+  const runningStepIndex = steps.findIndex(step => step.status === 'in_progress')
 
-  // Auto-scroll to running step
   useEffect(() => {
-    if (runningStepId && activeStepRef.current) {
+    if (runningStepIndex >= 0 && activeStepRef.current) {
       activeStepRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-  }, [runningStepId])
+  }, [runningStepIndex])
 
-  const toggleStep = (stepId: string) => {
+  const toggleStep = (stepIndex: number) => {
     const newExpanded = new Set(expandedSteps)
-    if (newExpanded.has(stepId)) {
-      newExpanded.delete(stepId)
+    if (newExpanded.has(stepIndex)) {
+      newExpanded.delete(stepIndex)
     } else {
-      newExpanded.add(stepId)
+      newExpanded.add(stepIndex)
     }
     setExpandedSteps(newExpanded)
-    onToggleLogs?.(stepId)
+    onToggleLogs?.(stepIndex)
   }
   
-  const getStatusIcon = (status: string, stepId: string) => {
-    const isExpanded = expandedSteps.has(stepId)
-    
+  const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
         return <CheckCircle className="text-green-500 shrink-0" size={18} />
-      case 'running':
-        return isExpanded ? (
-          <Loader2 className="text-primary animate-spin shrink-0" size={18} />
-        ) : (
-          <Loader2 className="text-primary animate-spin shrink-0" size={18} />
-        )
+      case 'in_progress':
+        return <Loader2 className="text-primary animate-spin shrink-0" size={18} />
       case 'failed':
         return <AlertCircle className="text-red-500 shrink-0" size={18} />
       default:
@@ -62,7 +52,7 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
     switch (status) {
       case 'completed':
         return '✓ Completed'
-      case 'running':
+      case 'in_progress':
         return '⟳ Running...'
       case 'failed':
         return '✗ Failed'
@@ -71,7 +61,6 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
     }
   }
   
-  // Don't render if all steps are complete (hide when done)
   if (allCompleted && steps.length > 0) {
     return null
   }
@@ -80,28 +69,28 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
     <div className="bg-muted/50 rounded-xl p-3 md:p-4 mx-2 md:mx-4 mb-3 border border-border">
       <h3 className="text-sm font-medium mb-3 flex items-center gap-2 text-foreground">
         <span className="w-2 h-2 bg-primary rounded-full animate-pulse" />
-        {runningStepId ? 'Processing...' : 'Planning steps'}
+        {runningStepIndex >= 0 ? 'Processing...' : 'Planning steps'}
       </h3>
       <div className="space-y-1">
         {steps.map((step, index) => {
-          const isRunning = step.status === 'running'
+          const isRunning = step.status === 'in_progress'
           const isActiveRef = isRunning ? { ref: activeStepRef } : {}
           
           return (
             <div 
-              key={step.id} 
+              key={index} 
               className={`transition-all duration-300 ${
                 isRunning ? 'bg-primary/10 -mx-2 px-2 py-1 rounded-lg' : ''
               }`}
               {...isActiveRef}
             >
               <Collapsible.Root 
-                open={expandedSteps.has(step.id)}
-                onOpenChange={() => toggleStep(step.id)}
+                open={expandedSteps.has(index)}
+                onOpenChange={() => toggleStep(index)}
               >
                 <Collapsible.Trigger className="w-full flex items-start gap-2 text-left p-1 rounded hover:bg-muted/50 transition-colors">
                   <div className="mt-0.5">
-                    {getStatusIcon(step.status, step.id)}
+                    {getStatusIcon(step.status)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
@@ -112,13 +101,13 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
                           ? 'text-red-500'
                           : 'text-foreground'
                       }`}>
-                        {index + 1}. {step.description}
+                        {step.step_number}. {step.description}
                       </p>
-                      {step.logs && (
+                      {step.result && (
                         <ChevronDown 
                           size={14} 
                           className={`shrink-0 transition-transform duration-200 ${
-                            expandedSteps.has(step.id) ? 'rotate-180' : ''
+                            expandedSteps.has(index) ? 'rotate-180' : ''
                           }`}
                         />
                       )}
@@ -128,7 +117,7 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
                         ? 'text-green-500' 
                         : step.status === 'failed'
                         ? 'text-red-500'
-                        : step.status === 'running'
+                        : step.status === 'in_progress'
                         ? 'text-primary'
                         : 'text-muted-foreground'
                     }`}>
@@ -138,17 +127,17 @@ export default function ProgressSteps({ steps, onToggleLogs }: ProgressStepsProp
                 </Collapsible.Trigger>
                 
                 <Collapsible.Content>
-                  {step.logs && (
-                    <div className="ml-7 mt-1 animate-in slide-in-from-top-2 duration-200">
-                      <pre className="p-3 bg-muted rounded-lg text-xs overflow-x-auto whitespace-pre-wrap text-muted-foreground border border-border">
-                        {step.logs}
-                      </pre>
-                    </div>
-                  )}
                   {step.result && (
-                    <div className="ml-7 mt-1">
+                    <div className="ml-7 mt-1 animate-in slide-in-from-top-2 duration-200">
                       <p className="text-xs text-muted-foreground">
                         Result: {step.result}
+                      </p>
+                    </div>
+                  )}
+                  {step.error && (
+                    <div className="ml-7 mt-1">
+                      <p className="text-xs text-red-500">
+                        Error: {step.error}
                       </p>
                     </div>
                   )}

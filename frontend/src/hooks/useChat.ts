@@ -6,33 +6,39 @@ export function useChat() {
   const {
     activeSessionId,
     addMessage,
-    addThought,
+    updateMessage,
     setMessages,
     prependMessages,
     setMessageTotal,
+    setPlan,
+    updatePlanStep,
+    clearPlan,
+    setStatusMessage,
+    appendStreamingContent,
+    setStreamingContent,
+    appendToLastMessage,
     isLoading,
     setLoading
   } = useChatStore()
 
   const sendMessage = useCallback(async (
     content: string,
-    deepSearch = false,
-    onStream?: (chunk: string) => void
+    deepSearch = false
   ) => {
     if (!content.trim() || isLoading) return
 
     setLoading(true)
+    clearPlan()
+    setStreamingContent('')
 
     try {
       const response = await chatApi.send(content, activeSessionId || undefined, deepSearch)
-      const { message_id: assistantMessageId, session_id, created_at } = response.data
+      const { session_id } = response.data
 
-      // Set active session FIRST so UI is ready to display messages
       if (!activeSessionId) {
         useChatStore.getState().setActiveSession(session_id)
       }
 
-      // Add user message with generated ID
       const userMessageId = `user-${Date.now()}`
       addMessage(session_id, {
         id: userMessageId,
@@ -41,103 +47,119 @@ export function useChat() {
         created_at: new Date().toISOString()
       })
 
-      // Add assistant message with ID from backend (will be updated by SSE)
+      const assistantMessageId = `assistant-${Date.now()}`
       addMessage(session_id, {
         id: assistantMessageId,
         role: 'assistant',
         content: '',
         agent_type: 'master',
-        created_at: created_at || new Date().toISOString()
+        created_at: new Date().toISOString()
       })
 
-      if (onStream) {
-        const eventSource = chatApi.stream(session_id)
+      const eventSource = chatApi.stream(session_id)
 
-        eventSource.addEventListener('thought', (e) => {
-          try {
-            const data = JSON.parse(e.data)
-            addThought(session_id, data.agent, data.content)
-          } catch (err) {
-            console.error('Failed to parse thought event:', err)
-          }
-        })
-
-        eventSource.addEventListener('message_chunk', (e) => {
+      eventSource.addEventListener('token', (e) => {
+        try {
           const data = JSON.parse(e.data)
-          if (data.content) {
-            onStream(data.content)
+          if (data.token) {
+            appendStreamingContent(data.token)
+            appendToLastMessage(session_id, data.token)
           }
-        })
-
-        eventSource.addEventListener('complete', () => {
-          eventSource.close()
-          setLoading(false)
-        })
-
-        eventSource.onerror = () => {
-          eventSource.close()
-          setLoading(false)
+        } catch (err) {
+          console.error('Failed to parse token event:', err)
         }
-      } else {
+      })
+
+      eventSource.addEventListener('status', (e) => {
+        try {
+          const data = JSON.parse(e.data)
+          setStatusMessage(data.message)
+        } catch (err) {
+          console.error('Failed to parse status event:', err)
+        }
+      })
+
+      eventSource.addEventListener('plan', (e) => {
+        try {
+          const data = JSON.parse(e.data)
+          setPlan(data.steps)
+        } catch (err) {
+          console.error('Failed to parse plan event:', err)
+        }
+      })
+
+      eventSource.addEventListener('step_update', (e) => {
+        try {
+          const data = JSON.parse(e.data)
+          updatePlanStep(data.step_index, {
+            status: data.status,
+            result: data.result,
+            error: data.error
+          })
+        } catch (err) {
+          console.error('Failed to parse step_update event:', err)
+        }
+      })
+
+      eventSource.addEventListener('message', (e) => {
+        try {
+          const data = JSON.parse(e.data)
+          if (data.message) {
+            updateMessage(session_id, assistantMessageId, {
+              content: data.message.content || useChatStore.getState().streamingContent,
+              metadata: data.message.metadata
+            })
+          }
+        } catch (err) {
+          console.error('Failed to parse message event:', err)
+        }
+      })
+
+      eventSource.addEventListener('done', () => {
+        eventSource.close()
+        setLoading(false)
+        setStatusMessage(null)
+      })
+
+      eventSource.addEventListener('error', (e: Event) => {
+        const event = e as MessageEvent
+        try {
+          if (event.data) {
+            const data = JSON.parse(event.data)
+            console.error('SSE error:', data.message)
+          }
+        } catch {
+          console.error('SSE connection error')
+        }
+        eventSource.close()
+        setLoading(false)
+      })
+
+      eventSource.onerror = () => {
+        eventSource.close()
         setLoading(false)
       }
 
-      return { message_id, session_id }
+      return { session_id }
     } catch (error) {
       console.error('Failed to send message:', error)
       setLoading(false)
       throw error
     }
-  }, [activeSessionId, addMessage, addThought, isLoading, setLoading])
-
-  const regenerateMessage = useCallback(async (messageId: string, onStream?: (chunk: string) => void) => {
-    if (!activeSessionId || isLoading) return
-
-    setLoading(true)
-
-    try {
-      const response = await chatApi.regenerate(messageId)
-      const { message_id, session_id } = response.data
-
-      if (onStream) {
-        const eventSource = chatApi.stream(session_id)
-
-        eventSource.addEventListener('thought', (e) => {
-          try {
-            const data = JSON.parse(e.data)
-            addThought(session_id, data.agent, data.content)
-          } catch (err) {
-            console.error('Failed to parse thought event:', err)
-          }
-        })
-
-        eventSource.addEventListener('message_chunk', (e) => {
-          const data = JSON.parse(e.data)
-          if (data.content) {
-            onStream(data.content)
-          }
-        })
-
-        eventSource.addEventListener('complete', () => {
-          eventSource.close()
-          setLoading(false)
-        })
-
-        eventSource.onerror = () => {
-          eventSource.close()
-          setLoading(false)
-        }
-      } else {
-        setLoading(false)
-      }
-
-      return { message_id, session_id }
-    } catch (error) {
-      console.error('Failed to regenerate message:', error)
-      setLoading(false)
-      throw error
-    }
-  }, [activeSessionId, isLoading, setLoading, addThought])
+  }, [
+    activeSessionId, 
+    addMessage, 
+    updateMessage,
+    isLoading, 
+    setLoading, 
+    clearPlan,
+    setPlan,
+    updatePlanStep,
+    setStatusMessage,
+    setStreamingContent,
+    appendStreamingContent,
+    appendToLastMessage
+  ])
 
   const loadMessages = useCallback(async (sessionId: string, limit = 30, offset = 0) => {
     try {
@@ -203,6 +225,48 @@ export function useChat() {
       throw error
     }
   }, [])
+
+  const regenerateMessage = useCallback(async (messageId: string) => {
+    if (!activeSessionId || isLoading) return
+
+    setLoading(true)
+    clearPlan()
+    setStreamingContent('')
+
+    try {
+      const response = await chatApi.regenerate(messageId)
+      const { session_id } = response.data
+
+      const eventSource = chatApi.stream(session_id)
+
+      eventSource.addEventListener('token', (e) => {
+        try {
+          const data = JSON.parse(e.data)
+          if (data.token) {
+            appendStreamingContent(data.token)
+          }
+        } catch (err) {
+          console.error('Failed to parse token event:', err)
+        }
+      })
+
+      eventSource.addEventListener('done', () => {
+        eventSource.close()
+        setLoading(false)
+      })
+
+      eventSource.onerror = () => {
+        eventSource.close()
+        setLoading(false)
+      }
+
+      return { session_id }
+    } catch (error) {
+      console.error('Failed to regenerate message:', error)
+      setLoading(false)
+      throw error
+    }
+  }, [activeSessionId, isLoading, setLoading, clearPlan, setStreamingContent, appendStreamingContent])
 
   return {
     sendMessage,

@@ -103,7 +103,7 @@ export default function MessageComponent({ message, onEdit }: MessageProps) {
     }
   }, [showContextMenu])
 
-  const thinkingContent = message.metadata?.thinking_content || "Processing..."
+  const thinkingContent = String(message.metadata?.thinking_content || "Processing...")
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} px-1 sm:px-2 md:px-0 group`}>
